@@ -83,7 +83,7 @@ function fp_solver(prices, beta, alpha, xs, ownership_mat, tol = 1e-14, maxiter 
         # I attempted to solve this by hand with the hessian but was pointed to
         # ForwardDiff by a friend
         H = ForwardDiff.jacobian(x -> fixed_pt(x, beta, alpha, xs, ownership_mat), p)
-        p_next = p - H \ fp(p, beta, alpha, xs, ownership_mat)
+        p_next = p - H \ fixed_pt(p, beta, alpha, xs, ownership_mat)
         diff = maximum(abs.(p.-p_next))
         iter+=1
         p = p_next
