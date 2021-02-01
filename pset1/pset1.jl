@@ -17,8 +17,13 @@ using Statistics
 using ForwardDiff
 
 
-path = "/Users/nadialucas/Dropbox/Second year/IO 2/pset1/"
-data = CSV.read(string(path, "psetOne.csv"), DataFrame)
+current_path = pwd()
+if pwd() == "/Users/nadialucas"
+    data_path = "/Users/nadialucas/Dropbox/Second year/IO 2/pset1/"
+elseif pwd() == "/home/nrlucas"
+    data_path = "/home/nrlucas/IO2Data/"
+end
+data = CSV.read(string(data_path, "psetOne.csv"), DataFrame)
 
 # Part 8: Market t=17 (data setup is a bit janky for now)
 data = @where(data, :Market .== 17)
