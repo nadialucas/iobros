@@ -77,6 +77,8 @@ function fp_solver(prices, beta, alpha, xs, ownership_mat, tol = 1e-14, maxiter 
     diff = 100
 
     while diff > tol && iter < maxiter
+        # I attempted to solve this by hand with the hessian but was pointed to
+        # ForwardDiff by a friend
         H = ForwardDiff.jacobian(x -> fixed_pt(x, beta, alpha, xs, ownership_mat), p)
         p_next = p - H \ fp(p, beta, alpha, xs, ownership_mat)
         diff = maximum(abs.(p.-p_next))
@@ -115,22 +117,85 @@ function get_numerator(delta_j, sigma, X_j, zeta_i)
 end
 
 function sHat(delta, X, sigma, zeta, I, J)
+    vec_probs = zeros(J)
     for i in 1:I
         zeta_i = zeta[i,:]
         denominator = 1
         numerator_vec = zeros(J)
         for j in 1:J
             X_j = X[j,:]
-            delta_j = delta[j,:]
-            num = get_numerator(delta_j, sigma, X_j, zeta_i)
-            denominator +=1
-
-
-
-
-
+            delta_j = delta[j]
+            num = exp(delta_j + X_j'* sigma * zeta_i)
+            denominator += num
+            numerator_vec[j] = num
         end
+        numerator_vec = numerator_vec./denominator
+        vec_probs .+= numerator_vec
     end
+    return vec_probs ./ I
 end
 
+
+J = 3
+I = 20
+numChars = 4
+delta = zeros(J)
+sigma = zeros(numChars, numChars)
+X = zeros(J, numChars)
+zeta = rand(dist, I, numChars)
+
+hi = sHat(delta, X, sigma, zeta, I, J)
+
+J = 3
+I = 20
+numChars = 4
+delta = zeros(J)
+delta[1] = 40
+delta[J] = 20
+sigma = zeros(numChars, numChars)
+X = zeros(J, numChars)
+zeta = rand(dist, I, numChars)
+
+hello = sHat(delta, X, sigma, zeta, I, J)
+
+J = 3
+I = 20
+numChars = 4
+delta = zeros(J)
+sigma = .1 * (zeros(numChars, numChars) + Diagonal(ones(numChars)))
+X = zeros(J, numChars)
+zeta = rand(dist, I, numChars)
+
+hey = sHat(delta, X, sigma, zeta, I, J)
+
+### Problem 10: Inverse share function (this is from contraction mapping)
+function sHat_inverse(s, sigma, X, zeta, I, J, tol = 1e-14, maxiter = 10000)
+    # initialize delta
+    delta = zeros(J)
+    diff = 100
+    iter = 0
+    while diff > tol && iter < maxiter
+        shat = sHat(delta, X, sigma, zeta, I, J)
+        delta_next = delta + log.(s) - log.(shat)
+        diff = maximum(abs.(delta.-delta_next))
+        iter+=1
+        delta = delta_next
+    end
+    return delta
+
+
+end
+
+J = 3
+I = 20
+numChars = 4
+delta = ones(J)
+delta[1] = 1.01
+sigma = zeros(numChars, numChars)
+X = zeros(J, numChars)
+zeta = rand(dist, I, numChars)
+
+shares = sHat(delta, X, sigma, zeta, I, J)
+# woooo it works!!
+delts = sHat_inverse(shares, sigma, X, zeta, I, J)
 
