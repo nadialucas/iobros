@@ -12,10 +12,8 @@ using DataFrames
 using DataFramesMeta
 using Random
 using Distributions
-using NLsolve
 using LinearAlgebra
 using Statistics
-using Optim
 using ForwardDiff
 
 
@@ -198,4 +196,9 @@ zeta = rand(dist, I, numChars)
 shares = sHat(delta, X, sigma, zeta, I, J)
 # woooo it works!!
 delts = sHat_inverse(shares, sigma, X, zeta, I, J)
+
+
+# Part 12
+
+
 
