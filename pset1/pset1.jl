@@ -63,9 +63,11 @@ xi = reshape(xi, (length(xi), 1))
 X_17_xi = [X_17'; xi']'
 
 # now compute all shares taking price
-theta = [-3, 1, 1, 2, -1, 1, 1]
-beta = theta[2:7]
+theta_xi = [-3, 1, 1, 2, -1, 1, 1]
+theta = [-3, 1, 1, 2, -1, 1]
+beta_xi = theta_xi[2:7]
 alpha = -1*theta[1]
+beta = theta[2:6]
 
 
 function get_shares(p, beta, alpha, xs)
@@ -108,7 +110,7 @@ function fp_solver(prices, beta, alpha, xs, ownership_mat)
     return p
 end
 
-homogenous_prices = fp_solver(P_17, beta, alpha, X_17_xi, O_17)
+homogenous_prices = fp_solver(P_17, beta_xi, alpha, X_17_xi, O_17)
 println(homogenous_prices)
 
 # we might need this later, who knows?
@@ -141,7 +143,7 @@ function sHat(delta, X, sigma, zeta, I, J)
         for j in 1:J
             X_j = X[j,:]
             delta_j = delta[j]
-            num = exp(delta_j + X_j'* sigma * zeta_i)
+            num = exp(delta_j + X_j'* (sigma .* zeta_i))
             denominator += num
             numerator_vec[j] = num
         end
@@ -156,7 +158,7 @@ J = 3
 I = 20
 numChars = 4
 delta = zeros(J)
-sigma = zeros(numChars, numChars)
+sigma = zeros(numChars)
 X = zeros(J, numChars)
 zeta = rand(dist, I, numChars)
 
@@ -168,7 +170,7 @@ numChars = 4
 delta = zeros(J)
 delta[1] = 40
 delta[J] = 20
-sigma = zeros(numChars, numChars)
+sigma = zeros(numChars)
 X = zeros(J, numChars)
 zeta = rand(dist, I, numChars)
 
@@ -178,7 +180,7 @@ J = 3
 I = 20
 numChars = 4
 delta = zeros(J)
-sigma = .1 * (zeros(numChars, numChars) + Diagonal(ones(numChars)))
+sigma = .1 * ones(numChars)
 X = zeros(J, numChars)
 zeta = rand(dist, I, numChars)
 
@@ -208,8 +210,8 @@ J = 3
 I = 20
 numChars = 4
 delta = ones(J)
-delta[1] = 1.01
-sigma = zeros(numChars, numChars)
+delta = [4, 2, 2]
+sigma = zeros(numChars)
 X = zeros(J, numChars)
 zeta = rand(dist, I, numChars)
 
@@ -221,10 +223,12 @@ delts = sHat_inverse(shares, sigma, X, zeta, I, J)
 # take in a sigma, the data (X, Z, S), the weighting matrix, and zeta draws
 # note that for now, just works in one market, could loop over multiple later
 function objective(sigma, X, Z, S, W, zeta)
-    I = length(zeta[:,1])
-    J = length(X[:,1])
+    # sigma has to be a vector input for built-in AD 
+    I = size(zeta, 1)
+    J = size(X,1)
     # calculate delta
     delta = sHat_inverse(S, sigma, X, zeta, I, J)
+    println(delta)
     
 
     # calculate theta
@@ -238,29 +242,101 @@ function objective(sigma, X, Z, S, W, zeta)
     return result
 end
 
-numChars = 5
-sigma = .1 * (zeros(numChars, numChars) + Diagonal(ones(numChars)))
+numChars = 6
+sigma = .1 * ones(numChars)
 zeta = rand(dist, I, numChars)
-W_17 = inv(Z_17'*Z_17)
-objective(sigma, X_17, Z_17, S_17, W_17, zeta)
+
+X = [P_17'; X_17']'
+Z = [X_17'; Z_17']'
+W_17 = inv(Z'*Z)
+objective(sigma, X, Z, S_17, W_17, zeta)
 
 
 # Part 12 The gradient
 
-function jacobian_theta(theta_bar, sigma, X, S, zeta)
+
+# rework the share equation to get heterogeneous shares (with sigma and zeta)
+function get_shares_het(theta_bar, X, sigma, zeta)
+    I = size(zeta, 1)
+    J = size(X, 1)
+    vec_shares = zeros(I, J)
+    for i in 1:I
+        num = exp.(X * theta_bar + X * (sigma .* zeta[i,:]))
+        vec_shares[i,:] = num./(1+sum(num))
+    end
+    #shares = (1.0/I) .* sum(vec_shares, dims = 1)
+    return vec_shares
 end
 
-function jacobian_xi(theta_bar, sigma, P, X, zeta)
+# this jacobian is individual level, returns J x J x I
+# gets collapsed in the other jacobian
+# collapsed down this is the full on market-level share jacobian
+function jacobian_xi(theta_bar, sigma, X, zeta)
+    J = size(X, 1)
+    I = size(zeta, 1)
     alpha = theta_bar[1]
     beta = theta_bar[2:length(theta_bar)]
     # get jacobian
-    jacobian_xi = get_jacobian(P, beta, alpha, X)
+    shares = get_shares_het(theta_bar, X, sigma, zeta)
+    jac = zeros(J, J, I)
+    for i in 1:I
+        shares_i = shares[i,:]
+        jac[:,:,i] = alpha .* shares_i * shares_i'
+        for j in 1:J
+            jac[j, j, i] = -alpha * shares_i[j] * (1-shares_i[j])
+        end
+    end
+    return jac
+end
+
+yo = jacobian_xi(theta, sigma, X, zeta)
+
+# now we collapse all down to a bigger jacobian which will be JxJxI
+# which is the 3d individual level jacobian
+function jacobian_theta(theta_bar, sigma, X, zeta)
+    I = size(zeta, 1)
+    J = size(X, 1)
+    K = size(X, 2)
+    jac_xi = jacobian_xi(theta_bar, sigma, X, zeta)
+    jac_xi_collapsed = mean(jac_xi, dims = 3)[:,:]
+    jac_theta = zeros(J, K)
+    for i in 1:I
+        jac_theta .+= jac_xi[:,:,i] * X * diagm(zeta[i,:])
+    end
+    jac_theta = jac_theta./I
+    return - jac_xi_collapsed \ jac_theta
 
 end
+
+heyyy = jacobian_theta(theta, sigma, X, zeta)
+
+# combine all the jacobians to get the gradient
 function gradient(sigma, X, Z, S, W, zeta)
+    I = size(zeta, 1)
+    J = size(X,1)
+    K = size(X,2)
 
+    # calculate delta
+    delta = sHat_inverse(S, sigma, X, zeta, I, J)
+
+    # calculate theta_bar
+    bread = X' * Z * W * Z'
+    theta_bar = (bread * X) \ bread * delta
+    
+    # calculate xi
+    xi = delta - X*theta
+
+    # get jacobian_theta
+    jac_theta = jacobian_theta(theta_bar, sigma, X, zeta)
+
+    return 2 * (jac_theta' * Z * W * Z')' * zeta'
 
 end
+
+grad = gradient(sigma, X, Z, S_17, W_17, zeta)
+
+hi = ForwardDiff.jacobian(x -> objective(x, X, Z, S_17, W_17, zeta), sigma)
+
 
 
 # import pyBLP
