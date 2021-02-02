@@ -6,6 +6,10 @@
 # 
 # running on Julia version 1.5.2
 ################################################################################
+# ENV["PYTHON"] = "/path/to/python3"
+# Pkg.build("PyCall")
+# restart Julia
+# PyCall.python # should show new path to python packages
 
 using CSV
 using DataFrames
@@ -15,6 +19,7 @@ using Distributions
 using LinearAlgebra
 using Statistics
 using ForwardDiff
+using PyCall
 
 
 current_path = pwd()
@@ -23,16 +28,18 @@ if pwd() == "/Users/nadialucas"
 elseif pwd() == "/home/nrlucas"
     data_path = "/home/nrlucas/IO2Data/"
 end
-data = CSV.read(string(data_path, "psetOne.csv"), DataFrame)
+main_data = CSV.read(string(data_path, "psetOne.csv"), DataFrame)
 
 # Part 8: Market t=17 (data setup is a bit janky for now)
-data = @where(data, :Market .== 17)
+data17 = @where(main_data, :Market .== 17)
 
 dist = Normal()
-data = @transform(data, xi = rand(dist, nrow(data)))
+data17 = @transform(data17, xi = rand(dist, nrow(data17)))
+#xi = [.838983, .931102, .385587, .885141, -.754398, 1.252868, .51293]
+#data17 = @transform(data17, xi = xi)
 
 # creates the ownership matrix
-justbrands = @select(data, :Brand2, :Brand3)
+justbrands = @select(data17, :Brand2, :Brand3)
 justbrands = convert(Matrix, justbrands)
 
 samebrand2 = [x1 == x2  ? 1 : 0 for x1 in justbrands[:,1], x2 in justbrands[:,1]  ]
@@ -43,10 +50,10 @@ ownership_mat = samebrand2 .* samebrand3
 theta = [-3, 1, 1, 2, -1, 1, 1]
 
 
-data_mat = @select(data, :Constant, :EngineSize, :SportsBike, :Brand2, :Brand3, :xi)
-prices_mat = @select(data, :Price)
-prices = convert(Matrix, prices_mat)
-xs = convert(Matrix, data_mat)
+data17_mat = @select(data17, :Constant, :EngineSize, :SportsBike, :Brand2, :Brand3, :xi)
+prices17_mat = @select(data17, :Price)
+prices17 = convert(Matrix, prices17_mat)
+xs = convert(Matrix, data17_mat)
 
 beta = theta[2:7]
 alpha = -1*theta[1]
@@ -74,11 +81,12 @@ function fixed_pt(p, beta, alpha, xs, ownership_mat)
     return -p - O\D
 end
 
-function fp_solver(prices, beta, alpha, xs, ownership_mat, tol = 1e-14, maxiter = 10000)
+function fp_solver(prices, beta, alpha, xs, ownership_mat)
+    tol = 1e-14
+    maxiter = 10000
     p = prices
     iter = 0
     diff = 100
-
     while diff > tol && iter < maxiter
         # I attempted to solve this by hand with the hessian but was pointed to
         # ForwardDiff by a friend
@@ -91,7 +99,7 @@ function fp_solver(prices, beta, alpha, xs, ownership_mat, tol = 1e-14, maxiter 
     return p
 end
 
-homogenous_prices = fp_solver(prices, beta, alpha, xs, ownership_mat)
+homogenous_prices = fp_solver(prices17, beta, alpha, xs, ownership_mat)
 println(homogenous_prices)
 
 # we might need this later, who knows?
@@ -206,4 +214,11 @@ delts = sHat_inverse(shares, sigma, X, zeta, I, J)
 # Part 12
 
 
+
+# import pyBLP
+
+pyblp = PyCall("pyblp")
+
+
+# call gradient
 
