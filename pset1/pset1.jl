@@ -228,7 +228,6 @@ function objective(sigma, X, Z, S, W, zeta)
     J = size(X,1)
     # calculate delta
     delta = sHat_inverse(S, sigma, X, zeta, I, J)
-    println(delta)
     
 
     # calculate theta
@@ -328,16 +327,21 @@ function gradient(sigma, X, Z, S, W, zeta)
 
     # get jacobian_theta
     jac_theta = jacobian_theta(theta_bar, sigma, X, zeta)
-
-    return 2 * (jac_theta' * Z * W * Z')' * zeta'
+    return 2 * jac_theta' * Z * W * Z' * xi
 
 end
 
 grad = gradient(sigma, X, Z, S_17, W_17, zeta)
 
-hi = ForwardDiff.jacobian(x -> objective(x, X, Z, S_17, W_17, zeta), sigma)
+sigma = convert(Array{Real},sigma)
+hi = ForwardDiff.gradient(x -> objective(x, X, Z, S_17, W_17, zeta), sigma)
 
 
+function wassup(sigma, X, Z, S, W, zeta)
+    return sum(X' * Z * W * Z' * X * sigma)
+end
+
+heyo = ForwardDiff.gradient(x-> wassup(x, X, Z, S_17, W_17, zeta), sigma)
 
 # import pyBLP
 
