@@ -15,4 +15,4 @@ ENV["PYTHON"] = "/usr/bin/python2.7"
 Pkg.build("PyCall")
 
 # then restart julia and you're good to run PyCall
-pyblp - pyimport("pyblp")
+pyblp = pyimport("pyblp")
