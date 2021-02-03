@@ -1,5 +1,5 @@
 using KNITRO
-using Base.Test
+#using Base.Test
 
 #    min  9 - 8x1 - 6x2 - 4x3
 #         + 2(x1^2) + 2(x2^2) + (x3^2) + 2(x1*x2) + 2(x1*x3)
@@ -13,10 +13,6 @@ using Base.Test
 #
 #  The problem comes from Hock and Schittkowski, HS35.
 
-open(string(data_path, "knitro_out.txt"), "a") do io
-    println(io, datapath)
-    close(io)
-end
 
 function eval_f(x::Vector{Float64})
   linear_terms = 9.0 - 8.0*x[1] - 6.0*x[2] - 4.0*x[3]
