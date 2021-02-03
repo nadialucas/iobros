@@ -1,16 +1,13 @@
 # Nadia Lucas and Fern Ramoutar
 # February 3, 2021
 #
-# We would like to thank Chase Abram, Jordan Rosenthal-Kay, Jeanne Sorin, 
-# George Vojta 
+# We would like to thank Chase Abram, Jordan Rosenthal-Kay, Jeanne Sorin, C
+# Camilla Schneier, George Vojta 
 # for helpful comments
 # 
 # running on Julia version 1.5.2
 ################################################################################
-# ENV["PYTHON"] = "/path/to/python3"
-# Pkg.build("PyCall")
-# restart Julia
-# PyCall.python # should show new path to python packages
+# our attempt to run problem 13
 
 import Pkg; Pkg.add("KNITRO")
 import Pkg; Pkg.add("JuMP")
@@ -31,10 +28,10 @@ if pwd() == "/Users/nadialucas"
     data_path = "/Users/nadialucas/Dropbox/Second year/IO 2/pset1/"
 elseif pwd() == "/home/nrlucas"
     data_path = "/home/nrlucas/IO2Data/"
-elseif pwd() == "/home/cschneier"
-    data_path = "/home/cschneier/IO/"
-    out_path = "/home/cschneier/nadia/"
 end
+
+# I tried to mess with my knitro settings in my acropolis account
+# and now it's not working - using Camilla's acropolis account to run
 main_data = CSV.read("/home/cschneier/IO/psetOne.csv", DataFrame)
 
 
@@ -214,8 +211,8 @@ end
 dist = Normal()
 numChars = 6
 sigma = .1 * ones(2)
-I = 50
-zeta = rand(dist, I, numChars)
+global I = 50
+global zeta = rand(dist, I, numChars)
 
 cov = @select(main_data, :Constant, :EngineSize, :SportsBike, :Brand2, :Brand3)
 inst = @select(main_data, :z1, :z2, :z3, :z4)
@@ -223,46 +220,40 @@ cov = convert(Matrix, cov)
 inst = convert(Matrix, inst)
 market = @select(main_data, :Market)
 market = convert(Matrix, market)
-M = reshape(market, length(market))
+global M = reshape(market, length(market))
 prices = @select(main_data, :Price)
 prices = convert(Matrix, prices)
 
 shares = @select(main_data, :shares)
-S = convert(Matrix, shares)
-X = [prices'; cov']'
-Z = [cov'; inst']'
+global S = convert(Matrix, shares)
+global X = [prices'; cov']'
+global Z = [cov'; inst']'
 
-W = inv(Z'*Z)
+global W = inv(Z'*Z)
 #objective(sigma, X, Z, S, W, zeta, M)
 
 
 
 sigma = .1 * ones(2)
-#grad = gradient(sigma, X, Z, S, W, zeta, M)
-#println(grad)
-# the gradient we want is the first and third elements
-#final_gradient = [grad[1], grad[3]]
-
-# This thing is not really even close lol
 
 # GMM Time
 
 # BABY MARKET for testing
-global X_10 = X[1:100,:]
-global Z_10 = Z[1:100,:]
-global W_10 = inv(Z'*Z)
-global M_10 = M[1:100,:]
-global S_10 = S[1:100,:]
-global numChars = 6
-sigma = .1 * ones(2)
-global I = 10
-global zeta_10 = rand(dist, I, numChars)
+#global X_10 = X[1:100,:]
+#global Z_10 = Z[1:100,:]
+#global W_10 = inv(Z'*Z)
+#global M_10 = M[1:100,:]
+#global S_10 = S[1:100,:]
+#global numChars = 6
+#sigma = .1 * ones(2)
+#global I = 10
+#global zeta_10 = rand(dist, I, numChars)
 
 function knitro_objective(sig)
-    return objective(sig, X_10, Z_10, S_10, W_10, zeta_10, M_10)
+    return objective(sig, X, Z, S, W, zeta, M)
 end
 function knitro_gradient(sig)
-    return gradient(sig, X_10, Z_10, S_10, W_10, zeta_10, M_10)
+    return gradient(sig, X, Z, S, W, zeta, M)
 end
 
 function callbackEvalF(kc, cb, evalRequest, evalResult, userParams)
@@ -281,9 +272,11 @@ function callbackEvalG!(kc, cb, evalRequest, evalResult, userParams)
     return 0
 end
 
+# using Tim's syntax from Camilla 
+# I thought this was due at midnight so could not debug
 
 n=2
-x_L = [0.0, 0.0]
+x_L = [-KNITRO.KN_INFINITY, -KNITRO.KN_INFINITY]
 x_U = [KNITRO.KN_INFINITY, KNITRO.KN_INFINITY]
 
 kc = KNITRO.KN_new()
@@ -298,3 +291,40 @@ KNITRO.KN_set_cb_grad(kc, cb, callbackEvalG!)
 nStatus = KNITRO.KN_solve(kc)
 nStatus, objSol, x, lambda_ = KNITRO.KN_get_solution(kc)
 
+# I could not get this to work
+
+# now reconstruct the xi 
+function reconstruct_xi(s, X, Z, S, W, zeta, M)
+    # sigma has to be a vector input for built-in AD 
+    K = size(X,2)
+    I = size(zeta, 1)
+    J = size(X,1)
+    sigma = zeros(K, K)
+    sigma[1] = s[1]
+    sigma[3,3] = s[2]
+    # calculate delta
+    deltas = []
+    for m in unique(M)
+        mask = findall(M .== m)
+        X_m = X[mask,:]
+        j = size(X_m, 1)
+        S_m = S[mask]
+        deltas = [deltas;sHat_inverse(S_m, sigma, X_m, zeta, I, j)]
+    end
+
+    deltas = reshape(deltas, (length(deltas), 1))
+
+    # calculate theta
+    bread = X' * Z * W * Z'
+    theta = (bread * X) \ bread * deltas
+
+    # calculate xi
+    xi = deltas - X*theta
+    return xi
+end
+
+xi = reconstruct_xi(obj_sol, X, Z, S, W, zeta, M)
+
+# from there redo the W
+# then call knitro again
+# then we have sigma and theta_bar that is our solution

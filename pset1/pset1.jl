@@ -1,16 +1,13 @@
 # Nadia Lucas and Fern Ramoutar
 # February 3, 2021
 #
-# We would like to thank Chase Abram, Jordan Rosenthal-Kay, Jeanne Sorin, 
-# George Vojta 
+# We would like to thank Chase Abram, Jordan Rosenthal-Kay, Jeanne Sorin,  
+# Camilla Schneier, George Vojta 
 # for helpful comments
 # 
 # running on Julia version 1.5.2
 ################################################################################
-# ENV["PYTHON"] = "/path/to/python3"
-# Pkg.build("PyCall")
-# restart Julia
-# PyCall.python # should show new path to python packages
+# Parts 8 - 13 
 
 using CSV
 using DataFrames
@@ -74,7 +71,7 @@ beta_xi = theta_xi[2:7]
 alpha = -1*theta[1]
 beta = theta[2:6]
 
-
+# helper functions for s and J in implicit function
 function get_shares(p, beta, alpha, xs)
     s = exp.(-alpha*p + xs*beta)
     D = s./(1+sum(s))
@@ -90,6 +87,7 @@ function get_jacobian(p, beta, alpha, xs)
     return J
 end
 
+# this is the implicit function we are setting to 0
 function fixed_pt(p, beta, alpha, xs, ownership_mat)
     D = get_shares(p, beta, alpha, xs)
     J = get_jacobian(p, beta, alpha, xs)
@@ -97,6 +95,7 @@ function fixed_pt(p, beta, alpha, xs, ownership_mat)
     return -p - O\D
 end
 
+# the Newton - Rhapson method of solving it
 function fp_solver(prices, beta, alpha, xs, ownership_mat)
     tol = 1e-14
     maxiter = 10000
@@ -122,12 +121,15 @@ println(homogenous_prices)
 
 #### Problem 9
 
+# share equation
 function sHat(delta, X, sigma, zeta, I, J)
     vec_probs = zeros(J)
+    # get share for each individual
     for i in 1:I
         zeta_i = zeta[i,:]
         denominator = 1
         numerator_vec = zeros(J)
+        # sum over objects
         for j in 1:J
             X_j = X[j,:]
             delta_j = delta[j]
@@ -138,10 +140,11 @@ function sHat(delta, X, sigma, zeta, I, J)
         numerator_vec = numerator_vec./denominator
         vec_probs .+= numerator_vec
     end
+    # average over individual
     return vec_probs ./ I
 end
 
-
+# run all the test cases from problem 9
 J = 3
 I = 20
 numChars = 4
@@ -150,7 +153,9 @@ sigma = zeros(numChars, numChars)
 X = zeros(J, numChars)
 zeta = rand(dist, I, numChars)
 
-hi = sHat(delta, X, sigma, zeta, I, J)
+share1 = sHat(delta, X, sigma, zeta, I, J)
+println("Part 9 solution")
+println(share1)
 
 J = 3
 I = 20
@@ -162,7 +167,8 @@ sigma = zeros(numChars, numChars)
 X = zeros(J, numChars)
 zeta = rand(dist, I, numChars)
 
-hello = sHat(delta, X, sigma, zeta, I, J)
+share2 = sHat(delta, X, sigma, zeta, I, J)
+println(share2)
 
 J = 3
 I = 20
@@ -172,7 +178,8 @@ sigma = .1 * (zeros(numChars, numChars) + Diagonal(ones(numChars)))
 X = zeros(J, numChars)
 zeta = rand(dist, I, numChars)
 
-hey = sHat(delta, X, sigma, zeta, I, J)
+share3 = sHat(delta, X, sigma, zeta, I, J)
+println(share3)
 
 ### Problem 10: Inverse share function (this is from contraction mapping)
 function sHat_inverse(s, sigma, X, zeta, I, J)
@@ -182,6 +189,7 @@ function sHat_inverse(s, sigma, X, zeta, I, J)
     delta = zeros(J)
     diff = 100
     iter = 0
+    # run the contraction
     while diff > tol && iter < maxiter
         shat = sHat(delta, X, sigma, zeta, I, J)
         delta_next = delta .+ log.(s) - log.(shat)
@@ -193,6 +201,8 @@ function sHat_inverse(s, sigma, X, zeta, I, J)
 
 end
 
+# verify this works with some of the shares output
+# from the share equation
 J = 3
 I = 20
 numChars = 4
@@ -205,6 +215,8 @@ zeta = rand(dist, I, numChars)
 shares = sHat(delta, X, sigma, zeta, I, J)
 # woooo it works!!
 delts = sHat_inverse(shares, sigma, X, zeta, I, J)
+println("10 verification: should give [4,2,2]")
+println(delts)
 
 # Part 11 The Objective function
 # take in a sigma, the data (X, Z, S), the weighting matrix, and zeta draws
@@ -246,6 +258,7 @@ sigma = .1 * ones(2)
 I = 50
 zeta = rand(dist, I, numChars)
 
+# set up and clean all the data to input this
 cov = @select(main_data, :Constant, :EngineSize, :SportsBike, :Brand2, :Brand3)
 inst = @select(main_data, :z1, :z2, :z3, :z4)
 cov = convert(Matrix, cov)
@@ -262,9 +275,9 @@ X = [prices'; cov']'
 Z = [cov'; inst']'
 
 W = inv(Z'*Z)
-objective(sigma, X, Z, S, W, zeta, M)
-
-#sigma = convert(Array{Real}, sigma)
+println("solution for objective theta = 0")
+obj_0 = objective(zeros(2), X, Z, S, W, zeta, M)
+println(obj_0)
 
 # Part 12 The gradient
 
@@ -356,7 +369,8 @@ function gradient(s, X, Z, S, W, zeta, M)
         X_m = X[mask,:]
         jacobians[mask,:] = jacobian_theta(theta_bar, sigma, X_m, zeta)
     end
-    return (2 * jacobians' * Z * W * Z' * xi)
+    grad = (2 * jacobians' * Z * W * Z' * xi)
+    return grad[1], grad[2]
 
 end
 
@@ -364,8 +378,6 @@ end
 sigma = .1 * ones(2)
 grad = gradient(sigma, X, Z, S, W, zeta, M)
 println(grad)
-# the gradient we want is the first and third elements
-final_gradient = [grad[1], grad[3]]
 
 # Check with AD
 # Forward diff is being finicky
@@ -373,46 +385,7 @@ final_gradient = [grad[1], grad[3]]
 AD_finite_grad = Calculus.gradient(x -> objective(x, X, Z, S, W, zeta, M), sigma)
 #0.10181718614028794
 #0.8471135214997823
-# This thing is not really even close lol
+# This thing is not really even close 
+# but I checked against some friends and this gradient was close
 
-# GMM Time
-
-# BABY MARKET for testing
-global X_10 = X[1:100,:]
-global Z_10 = Z[1:100,:]
-global W_10 = inv(Z'*Z)
-global M_10 = M[1:100,:]
-global S_10 = S[1:100,:]
-global numChars = 6
-sigma = .1 * ones(2)
-global I = 10
-global zeta_10 = rand(dist, I, numChars)
-
-function knitro_objective(sig)
-    return objective(sig, X_10, Z_10, S_10, W_10, zeta_10, M_10)
-end
-
-function knitro_gradient(sig)
-    return gradient(sig, X_10, Z_10, S_10, W_10, zeta_10, M_10)
-end
-
-sig = [.1, .1]
-# Objective information
-objGoal = KTR_OBJGOAL_MINIMIZE
-objType = KTR_OBJTYPE_GENERAL
-# Bounds
-x_L = [-KTR_INFBOUND, -KTR_INFBOUND]
-x_U = [KTR_INFBOUND,KTR_INFBOUND]
-# actually run KNITRO
-kp = createProblem()
-loadOptionsFile(kp, "knitro.opt")
-initializeProblem(kp, objGoal, objType, x_L, x_U)
-#, c_Type, c_L, c_U, jac_var, jac_con)
-setCallbacks(kp, knitro_objective, [], knitro_gradient, [])
-solveProblem(kp)
-
-open(string(out_path, "knitro_out.txt"), "a") do io
-    println(io, kp)
-    close(io)
-end
-
+# the knitro step is in a different codefile
