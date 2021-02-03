@@ -312,7 +312,7 @@ KNITRO.KN_set_con_lobnds(kc, [0.0, 0.0])
 #KNITRO.KN_add_con_quadratic_struct(kc, 1, 1, 1, 1.0)
 cIndices = ones(2)
 cIndices[2] = 2
-cb = KNITRO.KN_add_eval_callback(kc, KNTRUE, cIndices, knitro_objective)
+cb = KNITRO.KN_add_eval_callback(kc, true, cIndices, knitro_objective)
 KNITRO.KN_set_cb_grad(kc, cb, knitro_gradient)
 nStatus = KNITRO.KN_solve(kc)
 
