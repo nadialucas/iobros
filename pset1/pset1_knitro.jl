@@ -272,7 +272,7 @@ x_L = [-KTR_INFBOUND, -KTR_INFBOUND]
 x_U = [KTR_INFBOUND,KTR_INFBOUND]
 # actually run KNITRO
 kp = createProblem()
-loadOptionsFile(kp, "knitro.opt")
+loadOptionsFile(kp, "/home/cschneier/nadia/iobros/pset1/knitro.opt")
 initializeProblem(kp, objGoal, objType, x_L, x_U)
 #, c_Type, c_L, c_U, jac_var, jac_con)
 setCallbacks(kp, knitro_objective, [], knitro_gradient, [])
