@@ -258,22 +258,41 @@ sigma = .1 * ones(2)
 global I = 10
 global zeta_10 = rand(dist, I, numChars)
 
-function knitro_objective(sig...)
-    s = [sig[1], sig[2]]
-    return objective(s, X_10, Z_10, S_10, W_10, zeta_10, M_10)
+function knitro_objective(sig)
+    return objective(sig, X_10, Z_10, S_10, W_10, zeta_10, M_10)
+end
+function knitro_gradient(sig)
+    return gradient(sig, X_10, Z_10, S_10, W_10, zeta_10, M_10)
 end
 
-function knitro_gradient(sig...)
-    s = [sig[1], sig[2]]
-    return gradient(s, X_10, Z_10, S_10, W_10, zeta_10, M_10)
+function callbackEvalF(kc, cb, evalRequest, evalResult, userParams)
+    x = evalRequest.x
+    evalResult.obj[1] = knitro_objective(x)
+    return 0
+end
+
+function callbackEvalG!(kc, cb, evalRequest, evalResult, userParams)
+    x = evalRequest.x
+    grad = knitro_gradient(x)
+    # Evaluate gradient of nonlinear objective
+    for i in 1:length(grad)
+      evalResult.objGrad[i] = grad[i]
+    end
+    return 0
 end
 
 
 
-model = Model()
-register(model, :knitro_objective, 2, knitro_objective, knitro_gradient)
 
-@variable(model, x[1:2] >= 0)
-@NLobjective(model, Min, knitro_objective(x[1], x[2]))
+kc = KNITRO.KN_new()
+KNITRO.KN_add_vars(kc, n)
+KNITRO.KN_set_var_lobnds(kc, x_L)
+KNITRO.KN_set_var_upbnds(kc, x_U)
+KNITRO.KN_set_var_primal_init_values(kc, sigma )
+KNITRO.KN_set_obj_goal(kc, KNITRO.KN_OBJGOAL_MINIMIZE)
 
-println(model)
+cb = KNITRO.KN_add_objective_callback(kc, callbackEvalF)
+KNITRO.KN_set_cb_grad(kc, cb, callbackEvalG!)
+nStatus = KNITRO.KN_solve(kc)
+nStatus, objSol, x, lambda_ = KNITRO.KN_get_solution(kc)
+
