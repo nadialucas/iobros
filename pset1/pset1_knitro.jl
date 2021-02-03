@@ -298,13 +298,13 @@ KNITRO.KN_set_var_upbnds(kc,  [KNITRO.KN_INFINITY, KNITRO.KN_INFINITY])
 KNITRO.KN_set_var_primal_init_values(kc, [0.1, 0.1])
 
 # Add the constraints and set their lower bounds
-m = 2
-KNITRO.KN_add_cons(kc, m)
-KNITRO.KN_set_con_lobnds(kc, [0.0, 0.0])
+#m = 2
+#KNITRO.KN_add_cons(kc, m)
+#KNITRO.KN_set_con_lobnds(kc, [0.0, 0.0])
 
 
-cb = KNITRO.KN_add_eval_callback(kc, true, 0, NULL, knitro_objective)
-KNITRO.KN_set_cb_grad(kc, cb, KN_DENSE, NULL, 0, NULL, NULL, knitro_gradient)
+cb = KNITRO.KN_add_eval_callback(kc, true, 0, nothing, knitro_objective)
+KNITRO.KN_set_cb_grad(kc, cb, nothing, nothing, 0, nothing, nothing, knitro_gradient)
 nStatus = KNITRO.KN_solve(kc)
 
 pritnln(kc)
