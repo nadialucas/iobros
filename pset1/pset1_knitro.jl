@@ -206,7 +206,8 @@ function gradient(s, X, Z, S, W, zeta, M)
         X_m = X[mask,:]
         jacobians[mask,:] = jacobian_theta(theta_bar, sigma, X_m, zeta)
     end
-    return (2 * jacobians' * Z * W * Z' * xi)
+    total_grad = (2 * jacobians' * Z * W * Z' * xi)
+    return [total_grad[1], total_grad[3]]
 
 end
 
@@ -257,58 +258,22 @@ sigma = .1 * ones(2)
 global I = 10
 global zeta_10 = rand(dist, I, numChars)
 
-function knitro_objective(kc, cb, evalRequest, evalResult, userParams)
-    sig = evalRequest.x
-    return objective(sig, X_10, Z_10, S_10, W_10, zeta_10, M_10)
+function knitro_objective(sig...)
+    s = [sig[1], sig[2]]
+    return objective(s, X_10, Z_10, S_10, W_10, zeta_10, M_10)
 end
 
-function knitro_gradient(kc, cb, evalRequest, evalResult, userParams)
-    sig = evalRequest.x
-    return gradient(sig, X_10, Z_10, S_10, W_10, zeta_10, M_10)
+function knitro_gradient(sig)
+    s = [sig[1], sig[2]]
+    return gradient(s, X_10, Z_10, S_10, W_10, zeta_10, M_10)
 end
 
-#sig = [.1, .1]
-# Objective information
-#objGoal = KTR_OBJGOAL_MINIMIZE
-#objType = KTR_OBJTYPE_GENERAL
-# Bounds
-#x_L = [-KTR_INFBOUND, -KTR_INFBOUND]
-#x_U = [KTR_INFBOUND,KTR_INFBOUND]
-# actually run KNITRO
-#kp = createProblem()
-#loadOptionsFile(kp, "/home/cschneier/nadia/iobros/pset1/knitro.opt")
-#initializeProblem(kp, objGoal, objType, x_L, x_U)
-#, c_Type, c_L, c_U, jac_var, jac_con)
-#setCallbacks(kp, knitro_objective, [], knitro_gradient, [])
-#solveProblem(kp)
-
-#open(string(out_path, "knitro_out.txt"), "a") do io
-#    println(io, kp)
-#    close(io)
-#end
-
-# Create a new Knitro solver instance.
-kc = KNITRO.KN_new()
-
-n = 2
-KNITRO.KN_add_vars(kc, n)
-KNITRO.KN_set_var_lobnds(kc,  [-KNITRO.KN_INFINITY, -KNITRO.KN_INFINITY]) # not necessary since infinite
-KNITRO.KN_set_var_upbnds(kc,  [KNITRO.KN_INFINITY, KNITRO.KN_INFINITY])
-# Define an initial point.  If not set, Knitro will generate one.
-KNITRO.KN_set_var_primal_init_values(kc, [0.1, 0.1])
-
-# Add the constraints and set their lower bounds
-#m = 2
-#KNITRO.KN_add_cons(kc, m)
-#KNITRO.KN_set_con_lobnds(kc, [0.0, 0.0])
 
 
-cb = KNITRO.KN_add_eval_callback(kc, true, 0, nothing, knitro_objective)
-KNITRO.KN_set_cb_grad(kc, cb, nothing, nothing, 0, nothing, nothing, knitro_gradient)
-nStatus = KNITRO.KN_solve(kc)
+model = Model()
+register(model, :knitro_objective, 2, knitro_objective, knitro_gradient)
 
-pritnln(kc)
-open(string(out_path, "knitro_out.txt"), "a") do io
-    println(io, kp)
-    close(io)
-end
+@variable(model, x[1:2] >= 0.5)
+@NLobjective(model, Min, knitro_gradient(x[1], x[2]))
+
+println(model)
