@@ -12,7 +12,7 @@
 # restart Julia
 # PyCall.python # should show new path to python packages
 
-Pkg.add("KNITRO")
+import Pkg; Pkg.add("KNITRO")
 using KNITRO
 using CSV
 using DataFrames
