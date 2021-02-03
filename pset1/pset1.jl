@@ -396,7 +396,7 @@ function knitro_gradient(sig)
     return gradient(sig, X_10, Z_10, S_10, W_10, zeta_10, M_10)
 end
 
-
+sig = [.1, .1]
 # Objective information
 objGoal = KTR_OBJGOAL_MINIMIZE
 objType = KTR_OBJTYPE_GENERAL
