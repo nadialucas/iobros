@@ -30,7 +30,7 @@ elseif pwd() == "/home/cschneier"
     data_path = "/home/cschneier/IO/"
     out_path = "/home/cschneier/nadia/"
 end
-main_data = CSV.read(string(data_path, "psetOne.csv"), DataFrame)
+main_data = CSV.read("/home/cschneier/IO/psetOne.csv"), DataFrame)
 
 
 
