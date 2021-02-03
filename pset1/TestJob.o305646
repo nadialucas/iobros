@@ -1,0 +1,12 @@
+/var/spool/torque/mom_priv/jobs/305646.acropolis.SC: line 8: /home/nrlucas/iobros/pset1/pset1_knitro.jl: Permission denied
+
+#################
+Epilogue Job Info:
+Job ID: 305646.acropolis
+User ID: nrlucas
+Job Name: TestJob
+Resource List: nodes=1:ppn=10,mem=10gb,neednodes=1:ppn=10,walltime=2400:00:00
+Resources Used: cput=00:00:00,vmem=0kb,walltime=00:00:00,mem=4388kb,energy_used=0
+Exit Code: 126
+#################
+
