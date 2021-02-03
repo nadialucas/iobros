@@ -48,7 +48,7 @@ function clean_data(df, mkt)
     P = convert(Matrix, P_mat)
     S_mat = @select(market, :shares)
     S = convert(Matrix, S_mat)
-    Z_mat = @select(market, :z1, :z2, :z3)
+    Z_mat = @select(market, :z1, :z2, :z3, :z4)
     Z = convert(Matrix, Z_mat)
     
     return O, X, P, S, Z
@@ -111,6 +111,7 @@ function fp_solver(prices, beta, alpha, xs, ownership_mat)
 end
 
 homogenous_prices = fp_solver(P_17, beta_xi, alpha, X_17_xi, O_17)
+println("Part 8 Solution")
 println(homogenous_prices)
 
 # we might need this later, who knows?
@@ -143,7 +144,7 @@ function sHat(delta, X, sigma, zeta, I, J)
         for j in 1:J
             X_j = X[j,:]
             delta_j = delta[j]
-            num = exp(delta_j + X_j'* (sigma .* zeta_i))
+            num = exp(delta_j + X_j'* (sigma * zeta_i))
             denominator += num
             numerator_vec[j] = num
         end
@@ -158,7 +159,7 @@ J = 3
 I = 20
 numChars = 4
 delta = zeros(J)
-sigma = zeros(numChars)
+sigma = zeros(numChars, numChars)
 X = zeros(J, numChars)
 zeta = rand(dist, I, numChars)
 
@@ -170,7 +171,7 @@ numChars = 4
 delta = zeros(J)
 delta[1] = 40
 delta[J] = 20
-sigma = zeros(numChars)
+sigma = zeros(numChars, numChars)
 X = zeros(J, numChars)
 zeta = rand(dist, I, numChars)
 
@@ -180,7 +181,7 @@ J = 3
 I = 20
 numChars = 4
 delta = zeros(J)
-sigma = .1 * ones(numChars)
+sigma = .1 * (zeros(numChars, numChars) + Diagonal(ones(numChars)))
 X = zeros(J, numChars)
 zeta = rand(dist, I, numChars)
 
@@ -196,13 +197,12 @@ function sHat_inverse(s, sigma, X, zeta, I, J)
     iter = 0
     while diff > tol && iter < maxiter
         shat = sHat(delta, X, sigma, zeta, I, J)
-        delta_next = delta + log.(s) - log.(shat)
+        delta_next = delta .+ log.(s) - log.(shat)
         diff = maximum(abs.(delta.-delta_next))
         iter+=1
         delta = delta_next
     end
     return delta
-
 
 end
 
@@ -211,7 +211,7 @@ I = 20
 numChars = 4
 delta = ones(J)
 delta = [4, 2, 2]
-sigma = zeros(numChars)
+sigma = zeros(numChars, numChars)
 X = zeros(J, numChars)
 zeta = rand(dist, I, numChars)
 
@@ -222,126 +222,167 @@ delts = sHat_inverse(shares, sigma, X, zeta, I, J)
 # Part 11 The Objective function
 # take in a sigma, the data (X, Z, S), the weighting matrix, and zeta draws
 # note that for now, just works in one market, could loop over multiple later
-function objective(sigma, X, Z, S, W, zeta)
+function objective(s, X, Z, S, W, zeta, mkts)
     # sigma has to be a vector input for built-in AD 
+    K = size(X,2)
     I = size(zeta, 1)
     J = size(X,1)
+    sigma = zeros(K, K)
+    sigma[1] = s[1]
+    sigma[3,3] = s[2]
     # calculate delta
-    delta = sHat_inverse(S, sigma, X, zeta, I, J)
-    
+    deltas = []
+    for m in unique(mkts)
+        mask = findall(mkts .== m)
+        X_m = X[mask,:]
+        j = size(X_m, 1)
+        S_m = S[mask]
+        deltas = [deltas;sHat_inverse(S_m, sigma, X_m, zeta, I, j)]
+    end
+
+    deltas = reshape(deltas, (length(deltas), 1))
 
     # calculate theta
     bread = X' * Z * W * Z'
-    theta = (bread * X) \ bread * delta
+    theta = (bread * X) \ bread * deltas
 
     # calculate xi
-    xi = delta - X*theta
+    xi = deltas - X*theta
 
-    result = (Z'*xi)' * W * Z' * xi
-    return result
+    result = xi' * Z * W * Z' * xi
+    return result[1]
 end
 
+# only two of the characteristics have random coefficients
 numChars = 6
-sigma = .1 * ones(numChars)
+sigma = .1 * ones(2)
+I = 50
 zeta = rand(dist, I, numChars)
 
-X = [P_17'; X_17']'
-Z = [X_17'; Z_17']'
-W_17 = inv(Z'*Z)
-objective(sigma, X, Z, S_17, W_17, zeta)
+cov = @select(main_data, :Constant, :EngineSize, :SportsBike, :Brand2, :Brand3)
+inst = @select(main_data, :z1, :z2, :z3, :z4)
+cov = convert(Matrix, cov)
+inst = convert(Matrix, inst)
+markets = @select(main_data, :Market)
+mkts = convert(Matrix, markets)
+mkts = reshape(mkts, length(mkts))
+prices = @select(main_data, :Price)
+prices = convert(Matrix, prices)
 
+shares = @select(main_data, :shares)
+S = convert(Matrix, shares)
+X = [prices'; cov']'
+Z = [cov'; inst']'
+
+W = inv(Z'*Z)
+objective(sigma, X, Z, S, W, zeta, mkts)
+
+#sigma = convert(Array{Real}, sigma)
+#ForwardDiff.gradient(x -> objective(x, X, Z, S, W, zeta, mkts), sigma)
 
 # Part 12 The gradient
 
 
 # rework the share equation to get heterogeneous shares (with sigma and zeta)
+# and keep it at the individual level to feed into the gradient helper functions
 function get_shares_het(theta_bar, X, sigma, zeta)
     I = size(zeta, 1)
     J = size(X, 1)
     vec_shares = zeros(I, J)
     for i in 1:I
-        num = exp.(X * theta_bar + X * (sigma .* zeta[i,:]))
+        num = exp.(X * theta_bar + X * (sigma * zeta[i,:]))
         vec_shares[i,:] = num./(1+sum(num))
     end
-    #shares = (1.0/I) .* sum(vec_shares, dims = 1)
     return vec_shares
 end
 
 # this jacobian is individual level, returns J x J x I
 # gets collapsed in the other jacobian
 # collapsed down this is the full on market-level share jacobian
-function jacobian_xi(theta_bar, sigma, X, zeta)
+function jacobian_xi_i(theta_bar, sigma, X, zeta)
     J = size(X, 1)
     I = size(zeta, 1)
-    alpha = theta_bar[1]
-    beta = theta_bar[2:length(theta_bar)]
-    # get jacobian
+    # get the shares from the heterogeneous share equation
     shares = get_shares_het(theta_bar, X, sigma, zeta)
     jac = zeros(J, J, I)
+    # for each individual, same kind of computation as homogeneous case
     for i in 1:I
         shares_i = shares[i,:]
-        jac[:,:,i] = alpha .* shares_i * shares_i'
+        jac[:,:,i] = -shares_i * shares_i'
         for j in 1:J
-            jac[j, j, i] = -alpha * shares_i[j] * (1-shares_i[j])
+            jac[j, j, i] = shares_i[j] * (1-shares_i[j])
         end
     end
     return jac
 end
 
-yo = jacobian_xi(theta, sigma, X, zeta)
-
-# now we collapse all down to a bigger jacobian which will be JxJxI
-# which is the 3d individual level jacobian
-function jacobian_theta(theta_bar, sigma, X, zeta)
+# now we collapse all down to a bigger jacobian which will be JxK
+# this is from the bottom of page 11 in the notes
+function jacobian_theta(theta_bar, sigma, X, zeta, mkt1)
     I = size(zeta, 1)
     J = size(X, 1)
     K = size(X, 2)
-    jac_xi = jacobian_xi(theta_bar, sigma, X, zeta)
-    jac_xi_collapsed = mean(jac_xi, dims = 3)[:,:]
+    jac_xi_i = jacobian_xi_i(theta_bar, sigma, X, zeta)
+    jac_xi_summed = sum(jac_xi_i, dims = 3)[:,:] 
+    jac_xi_all = jac_xi_summed./I
+    
     jac_theta = zeros(J, K)
     for i in 1:I
-        jac_theta .+= jac_xi[:,:,i] * X * diagm(zeta[i,:])
+        jac_theta .+= jac_xi_i[:,:,i] * X * Diagonal(zeta[i,:])
     end
     jac_theta = jac_theta./I
-    return - jac_xi_collapsed \ jac_theta
+    return -inv(jac_xi_all) * jac_theta
 
 end
 
-heyyy = jacobian_theta(theta, sigma, X, zeta)
-
 # combine all the jacobians to get the gradient
-function gradient(sigma, X, Z, S, W, zeta)
+function gradient(s, X, Z, S, W, zeta, mkts)
+    sigma = zeros(numChars, numChars)
+    sigma[1] = s[1]
+    sigma[3,3] = s[2]
     I = size(zeta, 1)
     J = size(X,1)
     K = size(X,2)
 
     # calculate delta
-    delta = sHat_inverse(S, sigma, X, zeta, I, J)
+    deltas = []
+    for m in unique(mkts)
+        mask = findall(mkts .== m)
+        X_m = X[mask,:]
+        j = size(X_m, 1)
+        S_m = S[mask]
+        deltas = [deltas;sHat_inverse(S_m, sigma, X_m, zeta, I, j)]
+    end
 
     # calculate theta_bar
     bread = X' * Z * W * Z'
-    theta_bar = (bread * X) \ bread * delta
+    theta_bar = (bread * X) \ bread * deltas
+
     
     # calculate xi
-    xi = delta - X*theta
+    xi = deltas - X*theta_bar
 
-    # get jacobian_theta
-    jac_theta = jacobian_theta(theta_bar, sigma, X, zeta)
-    return 2 * jac_theta' * Z * W * Z' * xi
+
+    # get jacobian_theta for each market
+    jacobians = zeros(J, K)
+    for m in unique(mkts)
+        mask = findall(mkts .== m)
+        X_m = X[mask,:]
+        mm = 0
+        if m == 1
+            mm=1
+        end
+        jacobians[mask,:] = jacobian_theta(theta_bar, sigma, X_m, zeta, mm)
+    end
+    return (2 * jacobians' * Z * W * Z' * xi)
 
 end
 
-grad = gradient(sigma, X, Z, S_17, W_17, zeta)
 
-sigma = convert(Array{Real},sigma)
-hi = ForwardDiff.gradient(x -> objective(x, X, Z, S_17, W_17, zeta), sigma)
+sigma = .1 * ones(2)
+grad = gradient(sigma, X, Z, S, W, zeta, mkts)
+println(grad)
 
-
-function wassup(sigma, X, Z, S, W, zeta)
-    return sum(X' * Z * W * Z' * X * sigma)
-end
-
-heyo = ForwardDiff.gradient(x-> wassup(x, X, Z, S_17, W_17, zeta), sigma)
 
 # import pyBLP
 
