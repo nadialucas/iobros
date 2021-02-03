@@ -5,4 +5,4 @@
 module load julia
 module load knitro
 # execute program
-julia $HOME/nadia/iobros/pset1/pset1_knitro.jl
+julia $HOME/nadia/iobros/pset1/pset1.jl
