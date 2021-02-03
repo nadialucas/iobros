@@ -205,6 +205,7 @@ function gradient(s, X, Z, S, W, zeta, M)
 
 end
 
+dist = Normal()
 numChars = 6
 sigma = .1 * ones(2)
 I = 50
