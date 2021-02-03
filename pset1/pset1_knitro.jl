@@ -77,7 +77,12 @@ loadOptionsFile(kp, "knitro.opt")
 initializeProblem(kp, objGoal, objType, x_L, x_U, c_Type, c_L, c_U, jac_var,
                   jac_con, hess_row, hess_col)
 setCallbacks(kp, eval_f, eval_g, eval_grad_f, eval_jac_g, eval_h, eval_hv)
-solveProblem(kp)
+solved = solveProblem(kp)
+
+open(string(data_path, "knitro_out.txt"), "a") do io
+    println(io, solved)
+    close(io)
+end
 
 
 # we will want to initialize problem,
