@@ -1,3 +1,5 @@
+import Pkg; Pkg.add("KNITRO")
+
 using KNITRO
 #using Base.Test
 
