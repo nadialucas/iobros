@@ -263,7 +263,7 @@ function knitro_objective(sig...)
     return objective(s, X_10, Z_10, S_10, W_10, zeta_10, M_10)
 end
 
-function knitro_gradient(sig)
+function knitro_gradient(sig...)
     s = [sig[1], sig[2]]
     return gradient(s, X_10, Z_10, S_10, W_10, zeta_10, M_10)
 end
@@ -273,7 +273,7 @@ end
 model = Model()
 register(model, :knitro_objective, 2, knitro_objective, knitro_gradient)
 
-@variable(model, x[1:2] >= 0.5)
-@NLobjective(model, Min, knitro_gradient(x[1], x[2]))
+@variable(model, x[1:2] >= 0)
+@NLobjective(model, Min, knitro_objective(x[1], x[2]))
 
 println(model)
