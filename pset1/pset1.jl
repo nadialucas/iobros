@@ -29,6 +29,9 @@ if pwd() == "/Users/nadialucas"
     data_path = "/Users/nadialucas/Dropbox/Second year/IO 2/pset1/"
 elseif pwd() == "/home/nrlucas"
     data_path = "/home/nrlucas/IO2Data/"
+elseif pwd() == "/home/cschneier"
+    data_path = "/home/cschneier/IO/"
+    out_path = "/home/cschneier/nadia/"
 end
 main_data = CSV.read(string(data_path, "psetOne.csv"), DataFrame)
 
@@ -116,24 +119,6 @@ homogenous_prices = fp_solver(P_17, beta_xi, alpha, X_17_xi, O_17)
 println("Part 8 Solution")
 println(homogenous_prices)
 
-# we might need this later, who knows?
-
-function hessian(p, beta, alpha, xs)
-    H = zeros(length(p), length(p), length(p))
-    D, J = shares_jacobian(p, beta, alpha, xs)
-    for i in eachindex(p)
-        for j in eachindex(p)
-            for k in eachindex(p)
-                if i==j | j==k
-                    H[i,j,k] = alpha * J[i,i] * (2*D[i].-1)
-                else
-                    H[i,j,k] = 2* alpha * J[i,k] * D[j]
-                end
-            end
-        end
-    end
-    return(H)
-end
 
 #### Problem 9
 
@@ -392,5 +377,42 @@ AD_finite_grad = Calculus.gradient(x -> objective(x, X, Z, S, W, zeta, M), sigma
 
 # GMM Time
 
+# BABY MARKET for testing
+global X_10 = X[1:100,:]
+global Z_10 = Z[1:100,:]
+global W_10 = inv(Z'*Z)
+global M_10 = M[1:100,:]
+global S_10 = S[1:100,:]
+global numChars = 6
+sigma = .1 * ones(2)
+global I = 10
+global zeta_10 = rand(dist, I, numChars)
 
+function knitro_objective(sig)
+    return objective(sig, X_10, Z_10, S_10, W_10, zeta_10, M_10)
+end
+
+function knitro_gradient(sig)
+    return gradient(sig, X_10, Z_10, S_10, W_10, zeta_10, M_10)
+end
+
+
+# Objective information
+objGoal = KTR_OBJGOAL_MINIMIZE
+objType = KTR_OBJTYPE_GENERAL
+# Bounds
+x_L = [-KTR_INFBOUND, -KTR_INFBOUND]
+x_U = [KTR_INFBOUND,KTR_INFBOUND]
+# actually run KNITRO
+kp = createProblem()
+loadOptionsFile(kp, "knitro.opt")
+initializeProblem(kp, objGoal, objType, x_L, x_U)
+#, c_Type, c_L, c_U, jac_var, jac_con)
+setCallbacks(kp, knitro_objective, [], knitro_gradient, [])
+solveProblem(kp)
+
+open(string(out_path, "knitro_out.txt"), "a") do io
+    println(io, kp)
+    close(io)
+end
 

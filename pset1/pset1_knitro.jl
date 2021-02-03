@@ -15,6 +15,13 @@ using KNITRO
 #
 #  The problem comes from Hock and Schittkowski, HS35.
 
+current_path = pwd()
+if pwd() == "/Users/nadialucas"
+    data_path = "/Users/nadialucas/Dropbox/Second year/IO 2/pset1/"
+elseif pwd() == "/home/nrlucas"
+    data_path = "/home/nrlucas/IO2Data/"
+end
+
 
 function eval_f(x::Vector{Float64})
   linear_terms = 9.0 - 8.0*x[1] - 6.0*x[2] - 4.0*x[3]
@@ -76,14 +83,14 @@ lambda  = zeros(n+m)
 obj     = [0.0]
 
 kp = createProblem()
-#loadOptionsFile(kp, "knitro.opt")
+loadOptionsFile(kp, "knitro.opt")
 initializeProblem(kp, objGoal, objType, x_L, x_U, c_Type, c_L, c_U, jac_var,
                   jac_con, hess_row, hess_col)
 setCallbacks(kp, eval_f, eval_g, eval_grad_f, eval_jac_g, eval_h, eval_hv)
-solved = solveProblem(kp)
+solveProblem(kp)
 
 open(string(data_path, "knitro_out.txt"), "a") do io
-    println(io, solved)
+    println(io, kp)
     println(io, datapath)
     close(io)
 end
