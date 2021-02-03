@@ -1,104 +1,281 @@
-import Pkg; Pkg.add("KNITRO")
-
-using KNITRO
-#using Base.Test
-
-#    min  9 - 8x1 - 6x2 - 4x3
-#         + 2(x1^2) + 2(x2^2) + (x3^2) + 2(x1*x2) + 2(x1*x3)
-#    subject to  c[0]:  x1 + x2 + 2x3 <= 3
-#                x1 >= 0
-#                x2 >= 0
-#                x3 >= 0
-#    initpt (0.5, 0.5, 0.5)
+# Nadia Lucas and Fern Ramoutar
+# February 3, 2021
 #
-#    Solution is x1=4/3, x2=7/9, x3=4/9, lambda=2/9  (f* = 1/9)
-#
-#  The problem comes from Hock and Schittkowski, HS35.
+# We would like to thank Chase Abram, Jordan Rosenthal-Kay, Jeanne Sorin, 
+# George Vojta 
+# for helpful comments
+# 
+# running on Julia version 1.5.2
+################################################################################
+# ENV["PYTHON"] = "/path/to/python3"
+# Pkg.build("PyCall")
+# restart Julia
+# PyCall.python # should show new path to python packages
+
+using CSV
+using DataFrames
+using DataFramesMeta
+using Random
+using Distributions
+using LinearAlgebra
+using Statistics
+
 
 current_path = pwd()
 if pwd() == "/Users/nadialucas"
     data_path = "/Users/nadialucas/Dropbox/Second year/IO 2/pset1/"
 elseif pwd() == "/home/nrlucas"
     data_path = "/home/nrlucas/IO2Data/"
+elseif pwd() == "/home/cschneier"
+    data_path = "/home/cschneier/IO/"
+    out_path = "/home/cschneier/nadia/"
+end
+main_data = CSV.read(string(data_path, "psetOne.csv"), DataFrame)
+
+
+
+#### Problem 9
+
+function sHat(delta, X, sigma, zeta, I, J)
+    vec_probs = zeros(J)
+    for i in 1:I
+        zeta_i = zeta[i,:]
+        denominator = 1
+        numerator_vec = zeros(J)
+        for j in 1:J
+            X_j = X[j,:]
+            delta_j = delta[j]
+            num = exp(delta_j + X_j'* (sigma * zeta_i))
+            denominator += num
+            numerator_vec[j] = num
+        end
+        numerator_vec = numerator_vec./denominator
+        vec_probs .+= numerator_vec
+    end
+    return vec_probs ./ I
 end
 
 
-function eval_f(x::Vector{Float64})
-  linear_terms = 9.0 - 8.0*x[1] - 6.0*x[2] - 4.0*x[3]
-  quad_terms = 2.0*x[1]^2 + 2.0*x[2]^2 + x[3]^2 + 2.0*x[1]*x[2] + 2.0*x[1]*x[3]
-  return linear_terms + quad_terms
+### Problem 10: Inverse share function (this is from contraction mapping)
+function sHat_inverse(s, sigma, X, zeta, I, J)
+    tol = 1e-14
+    maxiter = 10000
+    # initialize delta
+    delta = zeros(J)
+    diff = 100
+    iter = 0
+    while diff > tol && iter < maxiter
+        shat = sHat(delta, X, sigma, zeta, I, J)
+        delta_next = delta .+ log.(s) - log.(shat)
+        diff = maximum(abs.(delta.-delta_next))
+        iter+=1
+        delta = delta_next
+    end
+    return delta
+
 end
 
-function eval_g(x::Vector{Float64}, cons::Vector{Float64})
-  cons[1] = x[1] + x[2] + 2.0*x[3]
+
+# Part 11 The Objective function
+# take in a sigma, the data (X, Z, S), the weighting matrix, and zeta draws
+# note that for now, just works in one market, could loop over multiple later
+function objective(s, X, Z, S, W, zeta, M)
+    # sigma has to be a vector input for built-in AD 
+    K = size(X,2)
+    I = size(zeta, 1)
+    J = size(X,1)
+    sigma = zeros(K, K)
+    sigma[1] = s[1]
+    sigma[3,3] = s[2]
+    # calculate delta
+    deltas = []
+    for m in unique(M)
+        mask = findall(M .== m)
+        X_m = X[mask,:]
+        j = size(X_m, 1)
+        S_m = S[mask]
+        deltas = [deltas;sHat_inverse(S_m, sigma, X_m, zeta, I, j)]
+    end
+
+    deltas = reshape(deltas, (length(deltas), 1))
+
+    # calculate theta
+    bread = X' * Z * W * Z'
+    theta = (bread * X) \ bread * deltas
+
+    # calculate xi
+    xi = deltas - X*theta
+
+    result = xi' * Z * W * Z' * xi
+    return result[1]
 end
 
-function eval_grad_f(x::Vector{Float64}, grad::Vector{Float64})
-  grad[1] = -8.0 + 4.0*x[1] + 2.0*x[2] + 2.0*x[3]
-  grad[2] = -6.0 + 2.0*x[1] + 4.0*x[2]
-  grad[3] = -4.0 + 2.0*x[1]            + 2.0*x[3]
+
+# Part 12 The gradient
+
+
+# rework the share equation to get heterogeneous shares (with sigma and zeta)
+# and keep it at the individual level to feed into the gradient helper functions
+function get_shares_het(theta_bar, X, sigma, zeta)
+    I = size(zeta, 1)
+    J = size(X, 1)
+    vec_shares = zeros(I, J)
+    for i in 1:I
+        num = exp.(X * theta_bar + X * (sigma * zeta[i,:]))
+        vec_shares[i,:] = num./(1+sum(num))
+    end
+    return vec_shares
 end
 
-function eval_jac_g(x::Vector{Float64}, jac::Vector{Float64})
-  jac[1] = 1.0
-  jac[2] = 1.0
-  jac[3] = 2.0
+# this jacobian is individual level, returns J x J x I
+# gets collapsed in the other jacobian
+# collapsed down this is the full on market-level share jacobian
+function jacobian_xi_i(theta_bar, sigma, X, zeta)
+    J = size(X, 1)
+    I = size(zeta, 1)
+    # get the shares from the heterogeneous share equation
+    shares = get_shares_het(theta_bar, X, sigma, zeta)
+    jac = zeros(J, J, I)
+    # for each individual, same kind of computation as homogeneous case
+    for i in 1:I
+        shares_i = shares[i,:]
+        jac[:,:,i] = -shares_i * shares_i'
+        for j in 1:J
+            jac[j, j, i] = shares_i[j] * (1-shares_i[j])
+        end
+    end
+    return jac
 end
 
-function eval_h(x::Vector{Float64}, lambda::Vector{Float64},
-                sigma::Float64, hess::Vector{Float64})
-  hess[1] = sigma*4.0
-  hess[2] = sigma*2.0
-  hess[3] = sigma*2.0
-  hess[4] = sigma*4.0
-  hess[5] = sigma*2.0
+# now we collapse all down to a bigger jacobian which will be JxK
+# this is from the bottom of page 11 in the notes
+function jacobian_theta(theta_bar, sigma, X, zeta)
+    I = size(zeta, 1)
+    J = size(X, 1)
+    K = size(X, 2)
+    jac_xi_i = jacobian_xi_i(theta_bar, sigma, X, zeta)
+    jac_xi_summed = sum(jac_xi_i, dims = 3)[:,:] 
+    jac_xi_all = jac_xi_summed./I
+    
+    jac_theta = zeros(J, K)
+    for i in 1:I
+        jac_theta .+= jac_xi_i[:,:,i] * X * Diagonal(zeta[i,:])
+    end
+    jac_theta = jac_theta./I
+    return -inv(jac_xi_all) * jac_theta
+
 end
 
-function eval_hv(x::Vector{Float64}, lambda::Vector{Float64},
-                 sigma::Float64, hv::Vector{Float64})
-  hv[1] = sigma*4.0*hv[1] + sigma*2.0*hv[2] + sigma*2.0*hv[3]
-  hv[2] = sigma*2.0*hv[1] + sigma*4.0*hv[2]
-  hv[3] = sigma*2.0*hv[1]                   + sigma*2.0*hv[3]
+# combine all the jacobians to get the gradient
+function gradient(s, X, Z, S, W, zeta, M)
+    sigma = zeros(numChars, numChars)
+    sigma[1] = s[1]
+    sigma[3,3] = s[2]
+    I = size(zeta, 1)
+    J = size(X,1)
+    K = size(X,2)
+
+    # calculate delta
+    deltas = []
+    for m in unique(M)
+        mask = findall(M .== m)
+        X_m = X[mask,:]
+        j = size(X_m, 1)
+        S_m = S[mask]
+        deltas = [deltas;sHat_inverse(S_m, sigma, X_m, zeta, I, j)]
+    end
+
+    # calculate theta_bar
+    bread = X' * Z * W * Z'
+    theta_bar = (bread * X) \ bread * deltas
+
+    
+    # calculate xi
+    xi = deltas - X*theta_bar
+
+
+    # get jacobian_theta for each market
+    jacobians = zeros(J, K)
+    for m in unique(M)
+        mask = findall(M .== m)
+        X_m = X[mask,:]
+        jacobians[mask,:] = jacobian_theta(theta_bar, sigma, X_m, zeta)
+    end
+    return (2 * jacobians' * Z * W * Z' * xi)
+
 end
 
+numChars = 6
+sigma = .1 * ones(2)
+I = 50
+zeta = rand(dist, I, numChars)
+
+cov = @select(main_data, :Constant, :EngineSize, :SportsBike, :Brand2, :Brand3)
+inst = @select(main_data, :z1, :z2, :z3, :z4)
+cov = convert(Matrix, cov)
+inst = convert(Matrix, inst)
+market = @select(main_data, :Market)
+market = convert(Matrix, market)
+M = reshape(market, length(market))
+prices = @select(main_data, :Price)
+prices = convert(Matrix, prices)
+
+shares = @select(main_data, :shares)
+S = convert(Matrix, shares)
+X = [prices'; cov']'
+Z = [cov'; inst']'
+
+W = inv(Z'*Z)
+#objective(sigma, X, Z, S, W, zeta, M)
+
+
+
+sigma = .1 * ones(2)
+grad = gradient(sigma, X, Z, S, W, zeta, M)
+println(grad)
+# the gradient we want is the first and third elements
+final_gradient = [grad[1], grad[3]]
+
+# This thing is not really even close lol
+
+# GMM Time
+
+# BABY MARKET for testing
+global X_10 = X[1:100,:]
+global Z_10 = Z[1:100,:]
+global W_10 = inv(Z'*Z)
+global M_10 = M[1:100,:]
+global S_10 = S[1:100,:]
+global numChars = 6
+sigma = .1 * ones(2)
+global I = 10
+global zeta_10 = rand(dist, I, numChars)
+
+function knitro_objective(sig)
+    return objective(sig, X_10, Z_10, S_10, W_10, zeta_10, M_10)
+end
+
+function knitro_gradient(sig)
+    return gradient(sig, X_10, Z_10, S_10, W_10, zeta_10, M_10)
+end
+
+sig = [.1, .1]
+# Objective information
 objGoal = KTR_OBJGOAL_MINIMIZE
-objType = KTR_OBJTYPE_QUADRATIC
-
-n = 3
-x_L = zeros(n)
-x_U = [KTR_INFBOUND,KTR_INFBOUND,KTR_INFBOUND]
-
-m = 1
-c_Type = [KTR_CONTYPE_LINEAR]
-c_L = [-KTR_INFBOUND]
-c_U = [3.0]
-
-jac_con = Int32[0,0,0]
-jac_var = Int32[0,1,2]
-hess_row = Int32[0,0,0,1,2]
-hess_col = Int32[0,1,2,1,2]
-
-x       = [0.5,0.5,0.5]
-lambda  = zeros(n+m)
-obj     = [0.0]
-
+objType = KTR_OBJTYPE_GENERAL
+# Bounds
+x_L = [-KTR_INFBOUND, -KTR_INFBOUND]
+x_U = [KTR_INFBOUND,KTR_INFBOUND]
+# actually run KNITRO
 kp = createProblem()
 loadOptionsFile(kp, "knitro.opt")
-initializeProblem(kp, objGoal, objType, x_L, x_U, c_Type, c_L, c_U, jac_var,
-                  jac_con, hess_row, hess_col)
-setCallbacks(kp, eval_f, eval_g, eval_grad_f, eval_jac_g, eval_h, eval_hv)
+initializeProblem(kp, objGoal, objType, x_L, x_U)
+#, c_Type, c_L, c_U, jac_var, jac_con)
+setCallbacks(kp, knitro_objective, [], knitro_gradient, [])
 solveProblem(kp)
 
-open(string(data_path, "knitro_out.txt"), "a") do io
+open(string(out_path, "knitro_out.txt"), "a") do io
     println(io, kp)
-    println(io, datapath)
     close(io)
 end
 
-
-# we will want to initialize problem,
-
-# solve problem once, with inputs W = inv(ZZ')
-#return xi
-
-# solve problem again 
