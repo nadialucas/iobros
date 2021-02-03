@@ -310,8 +310,7 @@ KNITRO.KN_set_con_lobnds(kc, [0.0, 0.0])
 
 # Add quadratic term x1^2 in the second constraint
 #KNITRO.KN_add_con_quadratic_struct(kc, 1, 1, 1, 1.0)
-cIndices = ones(2)
-cIndices[1] = 0
+cIndices = zeros(2)
 cIndices = convert(Array{Int32,1}, cIndices)
 cb = KNITRO.KN_add_eval_callback(kc, true, cIndices, knitro_objective)
 KNITRO.KN_set_cb_grad(kc, cb, knitro_gradient)
