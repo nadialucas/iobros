@@ -56,7 +56,7 @@ function clean_data(df, mkt)
     return O, X, P, S, Z
 end
 
-# Part 8
+####### Problem 8
 O_17, X_17, P_17, S_17, Z_17 = clean_data(main_data, 17)
 
 dist = Normal()
@@ -95,7 +95,7 @@ function fixed_pt(p, beta, alpha, xs, ownership_mat)
     return -p - O\D
 end
 
-# the Newton - Rhapson method of solving it
+# the Newton - Raphson method of solving it
 function fp_solver(prices, beta, alpha, xs, ownership_mat)
     tol = 1e-14
     maxiter = 10000
@@ -181,7 +181,8 @@ zeta = rand(dist, I, numChars)
 share3 = sHat(delta, X, sigma, zeta, I, J)
 println(share3)
 
-### Problem 10: Inverse share function (this is from contraction mapping)
+####### Problem 10
+# Inverse share function (this is from contraction mapping)
 function sHat_inverse(s, sigma, X, zeta, I, J)
     tol = 1e-14
     maxiter = 10000
@@ -218,7 +219,8 @@ delts = sHat_inverse(shares, sigma, X, zeta, I, J)
 println("10 verification: should give [4,2,2]")
 println(delts)
 
-# Part 11 The Objective function
+####### Problem 11
+# The Objective function
 # take in a sigma, the data (X, Z, S), the weighting matrix, and zeta draws
 # note that for now, just works in one market, could loop over multiple later
 function objective(s, X, Z, S, W, zeta, M)
@@ -279,9 +281,8 @@ println("solution for objective theta = 0")
 obj_0 = objective(zeros(2), X, Z, S, W, zeta, M)
 println(obj_0)
 
-# Part 12 The gradient
-
-
+####### Problem 12
+# The gradient
 # rework the share equation to get heterogeneous shares (with sigma and zeta)
 # and keep it at the individual level to feed into the gradient helper functions
 function get_shares_het(theta_bar, X, sigma, zeta)
