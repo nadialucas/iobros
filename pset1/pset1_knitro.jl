@@ -13,6 +13,11 @@ using Base.Test
 #
 #  The problem comes from Hock and Schittkowski, HS35.
 
+open(string(data_path, "knitro_out.txt"), "a") do io
+    println(io, datapath)
+    close(io)
+end
+
 function eval_f(x::Vector{Float64})
   linear_terms = 9.0 - 8.0*x[1] - 6.0*x[2] - 4.0*x[3]
   quad_terms = 2.0*x[1]^2 + 2.0*x[2]^2 + x[3]^2 + 2.0*x[1]*x[2] + 2.0*x[1]*x[3]
@@ -81,6 +86,7 @@ solved = solveProblem(kp)
 
 open(string(data_path, "knitro_out.txt"), "a") do io
     println(io, solved)
+    println(io, datapath)
     close(io)
 end
 
