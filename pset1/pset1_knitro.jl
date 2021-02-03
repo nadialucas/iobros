@@ -283,12 +283,14 @@ end
 
 
 n=2
+x_L = [0.0, 0.0]
+x_U = [KNITRO.KN_INFINITY, KNITRO.KN_INFINITY]
 
 kc = KNITRO.KN_new()
 KNITRO.KN_add_vars(kc, n)
 KNITRO.KN_set_var_lobnds(kc, x_L)
 KNITRO.KN_set_var_upbnds(kc, x_U)
-KNITRO.KN_set_var_primal_init_values(kc, sigma )
+KNITRO.KN_set_var_primal_init_values(kc, [0.1, 0.1] )
 KNITRO.KN_set_obj_goal(kc, KNITRO.KN_OBJGOAL_MINIMIZE)
 
 cb = KNITRO.KN_add_objective_callback(kc, callbackEvalF)
