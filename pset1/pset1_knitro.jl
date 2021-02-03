@@ -282,7 +282,7 @@ function callbackEvalG!(kc, cb, evalRequest, evalResult, userParams)
 end
 
 
-
+n=2
 
 kc = KNITRO.KN_new()
 KNITRO.KN_add_vars(kc, n)
