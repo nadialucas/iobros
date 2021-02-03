@@ -1,7 +1,8 @@
 # Nadia Lucas and Fern Ramoutar
 # February 3, 2021
 #
-# We would like to thank Chase Abram, Jordan Rosenthal-Kay, and Jeanne Sorin 
+# We would like to thank Chase Abram, Jordan Rosenthal-Kay, Jeanne Sorin, 
+# George Vojta 
 # for helpful comments
 # 
 # running on Julia version 1.5.2
@@ -20,6 +21,7 @@ using LinearAlgebra
 using Statistics
 using ForwardDiff
 using PyCall
+using FiniteDiff
 
 
 current_path = pwd()
@@ -222,7 +224,7 @@ delts = sHat_inverse(shares, sigma, X, zeta, I, J)
 # Part 11 The Objective function
 # take in a sigma, the data (X, Z, S), the weighting matrix, and zeta draws
 # note that for now, just works in one market, could loop over multiple later
-function objective(s, X, Z, S, W, zeta, mkts)
+function objective(s, X, Z, S, W, zeta, M)
     # sigma has to be a vector input for built-in AD 
     K = size(X,2)
     I = size(zeta, 1)
@@ -232,8 +234,8 @@ function objective(s, X, Z, S, W, zeta, mkts)
     sigma[3,3] = s[2]
     # calculate delta
     deltas = []
-    for m in unique(mkts)
-        mask = findall(mkts .== m)
+    for m in unique(M)
+        mask = findall(M .== m)
         X_m = X[mask,:]
         j = size(X_m, 1)
         S_m = S[mask]
@@ -263,9 +265,9 @@ cov = @select(main_data, :Constant, :EngineSize, :SportsBike, :Brand2, :Brand3)
 inst = @select(main_data, :z1, :z2, :z3, :z4)
 cov = convert(Matrix, cov)
 inst = convert(Matrix, inst)
-markets = @select(main_data, :Market)
-mkts = convert(Matrix, markets)
-mkts = reshape(mkts, length(mkts))
+market = @select(main_data, :Market)
+market = convert(Matrix, market)
+M = reshape(market, length(market))
 prices = @select(main_data, :Price)
 prices = convert(Matrix, prices)
 
@@ -275,10 +277,9 @@ X = [prices'; cov']'
 Z = [cov'; inst']'
 
 W = inv(Z'*Z)
-objective(sigma, X, Z, S, W, zeta, mkts)
+objective(sigma, X, Z, S, W, zeta, M)
 
 #sigma = convert(Array{Real}, sigma)
-#ForwardDiff.gradient(x -> objective(x, X, Z, S, W, zeta, mkts), sigma)
 
 # Part 12 The gradient
 
@@ -318,7 +319,7 @@ end
 
 # now we collapse all down to a bigger jacobian which will be JxK
 # this is from the bottom of page 11 in the notes
-function jacobian_theta(theta_bar, sigma, X, zeta, mkt1)
+function jacobian_theta(theta_bar, sigma, X, zeta)
     I = size(zeta, 1)
     J = size(X, 1)
     K = size(X, 2)
@@ -336,7 +337,7 @@ function jacobian_theta(theta_bar, sigma, X, zeta, mkt1)
 end
 
 # combine all the jacobians to get the gradient
-function gradient(s, X, Z, S, W, zeta, mkts)
+function gradient(s, X, Z, S, W, zeta, M)
     sigma = zeros(numChars, numChars)
     sigma[1] = s[1]
     sigma[3,3] = s[2]
@@ -346,8 +347,8 @@ function gradient(s, X, Z, S, W, zeta, mkts)
 
     # calculate delta
     deltas = []
-    for m in unique(mkts)
-        mask = findall(mkts .== m)
+    for m in unique(M)
+        mask = findall(M .== m)
         X_m = X[mask,:]
         j = size(X_m, 1)
         S_m = S[mask]
@@ -365,14 +366,10 @@ function gradient(s, X, Z, S, W, zeta, mkts)
 
     # get jacobian_theta for each market
     jacobians = zeros(J, K)
-    for m in unique(mkts)
-        mask = findall(mkts .== m)
+    for m in unique(M)
+        mask = findall(M .== m)
         X_m = X[mask,:]
-        mm = 0
-        if m == 1
-            mm=1
-        end
-        jacobians[mask,:] = jacobian_theta(theta_bar, sigma, X_m, zeta, mm)
+        jacobians[mask,:] = jacobian_theta(theta_bar, sigma, X_m, zeta)
     end
     return (2 * jacobians' * Z * W * Z' * xi)
 
@@ -380,14 +377,20 @@ end
 
 
 sigma = .1 * ones(2)
-grad = gradient(sigma, X, Z, S, W, zeta, mkts)
+grad = gradient(sigma, X, Z, S, W, zeta, M)
 println(grad)
+# the gradient we want is the first and third elements
+final_gradient = [grad[1], grad[3]]
+
+# Check with AD
+# Forward diff is being finicky
+# AD_grad = ForwardDiff.gradient(x -> objective(x, X, Z, S, W, zeta, M), sigma)
+AD_finite_grad = Calculus.gradient(x -> objective(x, X, Z, S, W, zeta, M), sigma)
+#0.10181718614028794
+#0.8471135214997823
+# This thing is not really even close lol
+
+# GMM Time
 
 
-# import pyBLP
-
-pyblp = pyimport("pyblp")
-
-
-# call gradient
 

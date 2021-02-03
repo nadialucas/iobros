@@ -8,6 +8,7 @@ Pkg.add("LinearAlgebra")
 Pkg.add("Statistics")
 Pkg.add("ForwardDiff")
 Pkg.add("PyCall")
+Pkg.add("FiniteDiff")
 
 # sets python environment to path 
 # run "which python" in terminal to get this
