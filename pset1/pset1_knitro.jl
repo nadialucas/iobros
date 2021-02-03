@@ -13,6 +13,8 @@
 # PyCall.python # should show new path to python packages
 
 import Pkg; Pkg.add("KNITRO")
+import Pkg; Pkg.add("JuMP")
+using JuMP
 using KNITRO
 using CSV
 using DataFrames
@@ -255,31 +257,66 @@ sigma = .1 * ones(2)
 global I = 10
 global zeta_10 = rand(dist, I, numChars)
 
-function knitro_objective(sig)
+function knitro_objective(kc, cb, evalRequest, evalResult, userParams)
+    sig = evalRequest.x
     return objective(sig, X_10, Z_10, S_10, W_10, zeta_10, M_10)
 end
 
-function knitro_gradient(sig)
+function knitro_gradient(kc, cb, evalRequest, evalResult, userParams)
+    sig = evalRequest.x
     return gradient(sig, X_10, Z_10, S_10, W_10, zeta_10, M_10)
 end
 
-sig = [.1, .1]
+#sig = [.1, .1]
 # Objective information
-objGoal = KTR_OBJGOAL_MINIMIZE
-objType = KTR_OBJTYPE_GENERAL
+#objGoal = KTR_OBJGOAL_MINIMIZE
+#objType = KTR_OBJTYPE_GENERAL
 # Bounds
-x_L = [-KTR_INFBOUND, -KTR_INFBOUND]
-x_U = [KTR_INFBOUND,KTR_INFBOUND]
+#x_L = [-KTR_INFBOUND, -KTR_INFBOUND]
+#x_U = [KTR_INFBOUND,KTR_INFBOUND]
 # actually run KNITRO
-kp = createProblem()
-loadOptionsFile(kp, "/home/cschneier/nadia/iobros/pset1/knitro.opt")
-initializeProblem(kp, objGoal, objType, x_L, x_U)
+#kp = createProblem()
+#loadOptionsFile(kp, "/home/cschneier/nadia/iobros/pset1/knitro.opt")
+#initializeProblem(kp, objGoal, objType, x_L, x_U)
 #, c_Type, c_L, c_U, jac_var, jac_con)
-setCallbacks(kp, knitro_objective, [], knitro_gradient, [])
-solveProblem(kp)
+#setCallbacks(kp, knitro_objective, [], knitro_gradient, [])
+#solveProblem(kp)
 
+#open(string(out_path, "knitro_out.txt"), "a") do io
+#    println(io, kp)
+#    close(io)
+#end
+
+# Create a new Knitro solver instance.
+kc = KNITRO.KN_new()
+
+n = 2
+KNITRO.KN_add_vars(kc, n)
+KNITRO.KN_set_var_lobnds(kc,  [-KNITRO.KN_INFINITY, -KNITRO.KN_INFINITY]) # not necessary since infinite
+KNITRO.KN_set_var_upbnds(kc,  [KNITRO.KN_INFINITY, KNITRO.KN_INFINITY])
+# Define an initial point.  If not set, Knitro will generate one.
+KNITRO.KN_set_var_primal_init_values(kc, [0.1, 0.1])
+
+# Add the constraints and set their lower bounds
+#m = 2
+#KNITRO.KN_add_cons(kc, m)
+#KNITRO.KN_set_con_lobnds(kc, [1.0, 0.0])
+
+# First load quadratic structure x0*x1 for the first constraint
+#KNITRO.KN_add_con_quadratic_struct(kc, 0, 0, 1, 1.0)
+
+# Add linear term x0 in the second constraint
+#KNITRO.KN_add_con_linear_struct(kc, 1, 0, 1.0)
+
+# Add quadratic term x1^2 in the second constraint
+#KNITRO.KN_add_con_quadratic_struct(kc, 1, 1, 1, 1.0)
+
+cb = KNITRO.KN_add_eval_callback(kc, knitro_objective)
+KNITRO.KN_set_cb_grad(kc, cb, knitro_gradient)
+nStatus = KNITRO.KN_solve(kc)
+
+pritnln(kc)
 open(string(out_path, "knitro_out.txt"), "a") do io
     println(io, kp)
     close(io)
 end
-
