@@ -302,18 +302,9 @@ m = 2
 KNITRO.KN_add_cons(kc, m)
 KNITRO.KN_set_con_lobnds(kc, [0.0, 0.0])
 
-# First load quadratic structure x0*x1 for the first constraint
-#KNITRO.KN_add_con_quadratic_struct(kc, 0, 0, 1, 1.0)
 
-# Add linear term x0 in the second constraint
-#KNITRO.KN_add_con_linear_struct(kc, 1, 0, 1.0)
-
-# Add quadratic term x1^2 in the second constraint
-#KNITRO.KN_add_con_quadratic_struct(kc, 1, 1, 1, 1.0)
-cIndices = zeros(1)
-cIndices = convert(Array{Int32,1}, cIndices)
-cb = KNITRO.KN_add_eval_callback(kc, true, cIndices, knitro_objective)
-KNITRO.KN_set_cb_grad(kc, cb, knitro_gradient)
+cb = KNITRO.KN_add_eval_callback(kc, true, 0, NULL, knitro_objective)
+KNITRO.KN_set_cb_grad(kc, cb, KN_DENSE, NULL, 0, NULL, NULL, knitro_gradient)
 nStatus = KNITRO.KN_solve(kc)
 
 pritnln(kc)
