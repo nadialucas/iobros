@@ -232,15 +232,15 @@ X = [prices'; cov']'
 Z = [cov'; inst']'
 
 W = inv(Z'*Z)
-objective(sigma, X, Z, S, W, zeta, M)
+#objective(sigma, X, Z, S, W, zeta, M)
 
 
 
 sigma = .1 * ones(2)
-grad = gradient(sigma, X, Z, S, W, zeta, M)
-println(grad)
+#grad = gradient(sigma, X, Z, S, W, zeta, M)
+#println(grad)
 # the gradient we want is the first and third elements
-final_gradient = [grad[1], grad[3]]
+#final_gradient = [grad[1], grad[3]]
 
 # This thing is not really even close lol
 
@@ -298,9 +298,9 @@ KNITRO.KN_set_var_upbnds(kc,  [KNITRO.KN_INFINITY, KNITRO.KN_INFINITY])
 KNITRO.KN_set_var_primal_init_values(kc, [0.1, 0.1])
 
 # Add the constraints and set their lower bounds
-#m = 2
-#KNITRO.KN_add_cons(kc, m)
-#KNITRO.KN_set_con_lobnds(kc, [1.0, 0.0])
+m = 2
+KNITRO.KN_add_cons(kc, m)
+KNITRO.KN_set_con_lobnds(kc, [0.0, 0.0])
 
 # First load quadratic structure x0*x1 for the first constraint
 #KNITRO.KN_add_con_quadratic_struct(kc, 0, 0, 1, 1.0)
@@ -310,8 +310,9 @@ KNITRO.KN_set_var_primal_init_values(kc, [0.1, 0.1])
 
 # Add quadratic term x1^2 in the second constraint
 #KNITRO.KN_add_con_quadratic_struct(kc, 1, 1, 1, 1.0)
-
-cb = KNITRO.KN_add_eval_callback(kc, knitro_objective)
+cIndices = ones(2)
+cIndices[2] = 2
+cb = KNITRO.KN_add_eval_callback(kc, KNTRUE, cIndices, knitro_objective)
 KNITRO.KN_set_cb_grad(kc, cb, knitro_gradient)
 nStatus = KNITRO.KN_solve(kc)
 
