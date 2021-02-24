@@ -12,10 +12,11 @@ using DataFrames
 using DataFramesMeta
 using Query
 using LinearAlgebra
+using StatsBase
 
 # get mileage data
 current_path = pwd()
-if (pwd() == "/Users/nadialucas") | (pwd() == "/Users/nadialucas/Documents/iobros")
+if pwd()[1:17] == "/Users/nadialucas"
     data_path = "/Users/nadialucas/Documents/iobros/pset2/"
 elseif pwd() == "/home/nrlucas"
     data_path = "/home/nrlucas/IO2Data/"
@@ -41,7 +42,7 @@ function utility_vec(d, θ)
     if d == 0
         utility = -θ[1] .* x .- θ[2] .* (x./100).^2
     elseif d == 1
-        utility = -θ[3]
+        utility = -θ[3] .+ zeros(K)
     end
     return utility
 end
@@ -65,7 +66,7 @@ for i in 1:data_size
         # should we ignore this or count?
         col2[i] = 0
     else
-        col2[i] = main_data[i-1, 1]
+        col2[i] = raw_data[i-1, 1]
     end
 end
 
@@ -113,36 +114,34 @@ for i in 1:K
 end
 
 
-function gamma(EV,F0,θ)
+function gamma(EV, θ, F0, β=.999)
     EV0 = EV[1]
-    term1 =  uvec(0,θ) .+ β .* EV 
-    term2 = uvec(1,θ) .+ β .* EV0 
-    hc = hcat(term1,term2)
-    v0 = [ maximum( hc[ii,:] ) for ii in 1:size(hc,1) ]
-    return F0 * ( v0 + log.( exp.( term1 .- v0 ) .+  exp.( term2 .- v0 ) ) )
+    V0 =  utility_vec(0,θ) .+ β .* EV 
+    V1 = utility_vec(1,θ) .+ β .* EV0 
+    # to avoid numerical instability
+    Vmax = [max(term1[i], term2[i]) for i in 1:length(term1)]
+    return F0 * 1.0.*( Vmax .+ log.( exp.( V0 .- Vmax ) .+  exp.( V1 .- Vmax ) ) )
 end
 
-function gamma(EV, θ, F0, β = .999)
-    EV0 = EV[1]
-    # must be evaluated at a vector for all states
-    u0 = utility_vec(0, θ)
-    # does not matter what x is
-    u1 = utility_vec(1, θ)
-    println(size(u0))
-    println(size(F0))
-    Gamma = F0 * (log.(exp.(u0 .+ β .* EV ) .+ exp.(u1 .+ β*EV0)))
-    return Gamma
-end
+#function gamma(EV, θ, F0, β = .999)
+#    EV0 = EV[1]
+#    # must be evaluated at a vector for all states
+#    u0 = utility_vec(0, θ)
+#    # does not matter what x is
+#    u1 = utility_vec(1, θ)
+#    Gamma = F0 * (log.(exp.(u0 .+ β .* EV ) .+ exp.(u1 .+ β*EV0)))
+#    return Gamma
+#end
 
 θ1 = [1,2,3]
-EV1 = zeros(K)
+EV1 = ones(K)
 gamma(EV1, θ1, F0)
 
 function get_pks(EV, θ, β=.999)
     EV0 = EV[1]
     u0 = utility_vec(0, θ)
     u1 = utility_vec(1, θ)
-    denominator = 1 .+ exp.(u1 .- β .* EV0 - u0 - β .* EV)
+    denominator = 1 .+ exp.(u1 .- β .* EV0 .- u0 - β .* EV)
     return 1 ./ denominator
 end
 
@@ -151,8 +150,10 @@ function gamma_prime(EV, θ, F0, β = .999)
     u0 = utility_vec(0, θ)
     u1 = utility_vec(1, θ)
     pks = get_pks(EV, θ)
-    numerator = exp.(u0 .+ β .* EV) 
-    return β .* F0 * (numerator ./ denom)
+    pks_diag = Diagonal(pks)
+    EV0term = zeros(K, K)
+    EV0term[:,1] = 1 .- pks
+    return β .* F0 * (pks_diag + EV0term)
 end
 
 θ1 = [1,2,3]
@@ -160,7 +161,7 @@ EV1 = zeros(K)
 yo = gamma_prime(EV1, θ1, F0)
 
 
-function newton_kantarovich(EV_start, θ, F0, β = .999, tol = 1e-14, maxiter = 1000)
+function newton_kantarovich(EV_start, θ, F0, tol = 1e-14, maxiter = 1000)
     EV_old = EV_start
     # initialize delta
     diff = 100
@@ -169,23 +170,38 @@ function newton_kantarovich(EV_start, θ, F0, β = .999, tol = 1e-14, maxiter = 
     # run the contraction
     while diff > tol && iter < maxiter
         Gamma_prime = gamma_prime(EV_old, θ, F0)
-        println(size(Gamma_prime))
-        println(ID - Gamma_prime)
         Gamma = gamma(EV_old, θ, F0)
-        println(ID - Gamma)
-        println("hai")
-        EV_next = EV_old - (ID - Gamma_prime) \ (ID - Gamma) * EV_old
+        EV_next = EV_old - (ID - Gamma_prime) \ (EV_old - Gamma)
         diff = maximum(abs.(EV_next.-EV_old))
         iter += 1
         EV_old = EV_next
     end
-    return EV_next
+    return EV_old
 end
+
+function solve_fixed_pt(EV_start, θ, F0, β = .999, maxiter = 1000)
+    EV_old = EV_start
+    # initialize delta
+    diff = 100
+    iter = 0
+    ID = Matrix{Float64}(I, K, K)
+    # run the contraction
+    while diff > β && iter < maxiter
+        EV_new = gamma(EV_old, θ, F0)
+        diff = maximum(abs.(EV_new.-EV_old))
+        EV_old = EV_new
+    end
+    println(EV_old)
+    println(diff)
+    println(iter)
+    final_EV = newton_kantarovich(EV_old, θ, F0)
+end
+
 
 
 θ1 = [1,2,3]
 EV1 = zeros(K)
-newton_kantarovich(EV1, θ1, F0)
+solve_fixed_pt(EV1, θ1, F0)
 
 
 #check tol ratio every step and then switch to newton kantorivich
