@@ -14,6 +14,8 @@ using DataFramesMeta
 using Query
 using LinearAlgebra
 using StatsBase
+using Optim
+using ForwardDiff
 
 # get mileage data
 current_path = pwd()
@@ -35,40 +37,6 @@ function utility(d, x, θ)
 end
 
 # set up Zurcher's utility in vector form
-#function utility_vec(d, θ)
-#    max_miles
-#    x = [0:K;]
-#    if d == 0
-#        utility = -θ[1] .* x .- θ[2] .* (x./100).^2
-#    elseif d == 1
-#        utility = -θ[3] .+ zeros(K)
-#    end
-#    return utility
-#end
-# utility inner func
-function u(x,d,θ)
-    if d == 0
-            return -θ[1].* x - θ[2] .* ( x ./ 100).^2 
-    end
-    if d == 1 
-            return -θ[3] .+ 0 .* x
-    end
-end
-function get_xk_mid(xvec,kvec,f)
-    K = maximum(kvec) - 1
-    fmids = zeros(K)
-    for kk in 2:(K)
-            inds = findall(x->x==kk,kvec)
-            mid = (maximum(xvec[inds]) + minimum(xvec[inds]) )/2
-            fmids[kk] = f(mid)
-    end
-    fmids[1] = f(0)
-    return fmids
-end
-# utility vector function
-#function utility_vec(d,θ)
-#    return get_xk_mid(miles,mile_k, xx->u(xx,d,θ))
-#end
 
 function utility_vec(d, x, θ)
     if d == 0
@@ -79,18 +47,19 @@ function utility_vec(d, x, θ)
     return utility
 end
 
-binned_miles = main_data[!,2]
+
 
 
 # how to recover engine replacement - mileage will decrease suddenly
 # first bin all the miles
-K = 10
-mileage = main_data[!,1]
+K = 21
+mileage = raw_data[!,1]
 bin_size = maximum(mileage ./ K)
 
 
-main_data = @transform(raw_data, mileage_binned = ceil.(Integer, :milage ./ bin_size))
 
+main_data = @transform(raw_data, mileage_binned = ceil.(Integer, :milage ./ bin_size))
+binned_miles = main_data[!,2]
 
 
 data_size = size(raw_data)[1]
@@ -160,18 +129,6 @@ end
 g_array2 = [g_dict2[i] for i in 0:max_miles]
 
 
-
-#milage_t_plus_1 = [1,2,4,6,1,4,6,7,1,2,3,4,1,2,1,4,6,7,4]
-#miles = milage_t_plus_1
-#K = 3
-#F0 = make_markov(miles, 0, K)[1]
-#F0 = make_markov(miles, 0, K)[1]
-#mile_k = make_markov(miles, 0, K)[2]
-#F1 = make_markov(miles, 1, K)[1]
-
-# expands out the state space of x in case we want 
-#miles_max = Int(maximum(main_data[!,1])+1 + max_miles)
-K = 10
 mileage = main_data[!,1]
 mile_k = main_data[!,2]
 bin_size = maximum(mileage ./ K)
@@ -222,23 +179,27 @@ function gamma(EV, x, θ, F0, β=.999)
     V0 =  utility_vec(0,x,θ) .+ β .* EV 
     V1 = utility_vec(1,x, θ) .+ β .* EV0 
     # to avoid numerical instability
-    Vmax = [max(V0[i], V1[i]) for i in 1:length(V0)]
-    return F0 * ( Vmax .+ log.( exp.( V0 .- Vmax ) .+  exp.( V1 .- Vmax ) ) )
+    #Vmax = [max(V0[i], V1[i]) for i in 1:length(V0)]
+    #return F0 * ( Vmax .+ log.( exp.( V0 .- Vmax ) .+  exp.( V1 .- Vmax ) ) )
+    return F0 * log.( exp.( V0  ) .+  exp.( V1 ) ) 
 end
 
 x = [1:K;] .* bin_size .- (bin_size ./ 2)
-θ1 = [1,1.25,120]
-EV1 = [1:K;]
+θ1 = [1,2,3]
+EV1 = zeros(K)
 G1 = gamma(EV1, x, θ1, F0_binned)
 G2 = gamma(G1, x, θ1, F0_binned)
 
 function get_pks(EV, x, θ, β=.999)
     EV0 = EV[1]
-    u0 = utility_vec(0, x, θ)
-    u1 = utility_vec(1, x, θ)
-    denominator = 1 .+ exp.(u1 .- β .* EV0 .- u0 - β .* EV)
+    V0 = utility_vec(0, x, θ) .+ β .* EV
+    V1 = utility_vec(1, x, θ) .+ β .* EV0
+
+    denominator = 1 .+ exp.(V0 .- V1)
     return 1 ./ denominator
 end
+
+get_pks(EV1, x, θ1)
 
 function gamma_prime(EV, x, θ, F0, β = .999)
     EV0 = EV[1]
@@ -251,7 +212,6 @@ function gamma_prime(EV, x, θ, F0, β = .999)
     return β .* F0 * (pks_diag + EV0term)
 end
 
-EV1 = ones(K)
 gamma_prime(EV1, x, θ1, F0_binned)
 get_pks(EV1, x, θ1)
 
@@ -312,12 +272,105 @@ function solve_fixed_pt(EV_start, x, θ, F0, β = .999, tol = 1e-14, maxiter = 1
     final_EV = newton_kantarovich(EV_old, x, θ, F0)
 end
 
-@time yvec = solve_fixed_pt(EV1, x, θ1, F0_binned)
-#xvec = get_xk_mid(milage_t_plus_1,mile_k, xx->xx)
-#using Plots
-#plot(xvec,yvec, label="EV(x|θ)")
-#xlabel!("miles driven")
-#ylabel!("continuation value")
+@time EV = solve_fixed_pt(EV1, x, θ1, F0_binned)
 
 
-#check tol ratio every step and then switch to newton kantorivich
+
+# likelihood time 
+
+function likelihood(θ, d, x, β=.999)
+    states = [1:K;] .* bin_size .- (bin_size ./ 2)
+    EV1 = [1:K;]
+    EV = solve_fixed_pt(EV1, states, θ, F0_binned)
+    println(EV)
+    u0 = utility_vec(0, states, θ)
+    u1 = utility_vec(1, states, θ)
+    V0 = u0 .+ β .* EV
+    V1 = u1 .+ β .* EV[1]
+    pk = 1 ./ (1 .+ exp.(V1 - V0))
+    likelihood = 0
+    for i in x
+        pxt = pk[i]
+        dt = d[i]
+        likelihood += dt * log(1-pxt) + (1-dt) * log(pxt)
+    end
+    return -likelihood
+end
+
+
+x = main_data[!,2]
+d = main_data[!,5]
+
+θ1 = [1,1,1]
+
+
+hi = likelihood(θ1, d, x)
+
+function f(θ)
+    return likelihood(θ, d, x)
+end
+
+gradient_auto = x -> ForwardDiff.gradient(f, x)
+gradient_auto(θ1)
+
+function du1(θ, x)
+    return [-x; -(x./100).^2; zeros(K)]
+end
+
+function du0(θ, x)
+    return [zeros(K); zeros(K); -ones(K)]
+end
+
+function dG(EV, θ, x, F0)
+    # Kx1
+    u0 = utility_vec(0, states, θ)
+    u1 = utility_vec(1, states, θ)
+    V0 = u0 .+ β .* EV
+    V1 = u1 .+ β .* EV[1]
+    # Kx3
+    du1_dtheta = du1(θ, x)
+    du0_dtheta = du0(θ, x)
+    # this should give a Kx3
+    numerator = exp.(V1) .* du1_dtheta .+ exp.(V0) .* du0_dtheta
+    # this is Kx1
+    denominator = exp.(V1) .+ exp.(V0)
+    # should return a Kx3
+    return F0 * (numerator ./ denominator)
+end
+
+function dEV(EV, θ, x)
+    # KxK
+    Gprime = gamma_prime(EV, x, θ, F0)
+    # Kx1
+    dG_dtheta = dG(EV, θ, x, F0)
+    # Kx1
+    return (I - Gprime) \ dG_dtheta
+end
+
+function dpk(θ, d, x, β = 0.999)
+    # these should be Kx1
+    u0 = utility_vec(0, states, θ)
+    u1 = utility_vec(1, states, θ)
+    V0 = u0 .+ β .* EV
+    V1 = u1 .+ β .* EV[1]
+    # these should be Kx3
+    du1_dtheta = du1(θ, x)
+    du0_dtheta = du0(θ, x)
+    dEV_dtheta = dEV(EV, θ, x)
+    dEV0 = dEV_dtheta[1]
+
+    coef = -(du1_dtheta .+ β .* dEV0 - du0_dtheta .- β .* dEV_dtheta)
+    return (coef .* exp.(V1 - V0)) ./ (1 .+ exp.(V1-V0)).^2
+end
+
+function likelihood_grad(θ, d, x, β=.999)
+    states = [1:K;] .* bin_size .- (bin_size ./ 2)
+    EV1 = [1:K;]
+    EV = solve_fixed_pt(EV1, states, θ, F0_binned)
+    pk = get_pks(EV, x, θ)
+    # this should return a Kx3
+    dpk_dtheta = dpk(θ, d, x)
+    # check dimensions to make sure this returns a 3x1
+    return (d .- (1.-pk)) * (-dpk_dtheta) + ((1 .- d) ./ pk) * dpk_dtheta
+end
+
