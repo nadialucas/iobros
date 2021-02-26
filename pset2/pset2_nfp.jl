@@ -21,23 +21,131 @@ using ForwardDiff
 current_path = pwd()
 if pwd()[1:17] == "/Users/nadialucas"
     data_path = "/Users/nadialucas/Documents/iobros/pset2/"
-elseif pwd() == "/home/nrlucas"
-    data_path = "/home/nrlucas/IO2Data/"
 end
 raw_data = CSV.read(string(data_path, "psetTwo.csv"), DataFrame)
 
-# set up Zurcher's utility
-function utility(d, x, θ)
-    if d == 0
-        utility = -θ[1] * x - θ[2] * (x/100)^2 + ϵ[1]
-    elseif d == 1
-        utility = -θ[3] + ϵ[2]
+################################################################################
+###### 2.3 Questions
+###### 1. Recover engine replacement and clean mileage data
+################################################################################
+
+# set up the number of bins of the state space
+K = 10
+mileage = raw_data[!,1]
+
+# how to recover engine replacement - mileage will decrease suddenly
+
+# first do some data manipulation to get all the mileage lags,
+# differences, replacement times, and then bin everything
+# accordingly
+# first get lags 
+data_size = size(raw_data)[1]
+col2 = zeros(data_size)
+for i in 1:data_size 
+    if i == 1
+        # we pretend the first observation was after driving
+        col2[i] = 0
+    else
+        col2[i] = raw_data[i-1, 1]
     end
-    return utility
+end
+main_data = insertcols!(raw_data, 2, :mileage_lag => col2)
+# using query to get at mileage intervals
+main_data = @from i in main_data begin
+    @select {
+        i.milage, i.mileage_lag,
+        replace = i.milage < i.mileage_lag ? 1 : 0,
+        interval = i.milage < i.mileage_lag ? i.milage : i.milage - i.mileage_lag
+    } 
+    @collect DataFrame
+end
+# get the maximum step size
+max_interval = maximum(filter(!isnan, main_data[!,4]))
+# use this to get the proper bins
+bin_size = maximum((mileage .+ max_interval) ./ K)
+# now get a binned lag and bin intervals using query
+main_data = @transform(main_data, mileage_binned = ceil.(Integer, (:milage .+ .01) ./ bin_size))
+main_data = @transform(main_data, mileage_binned_lag = ceil.(Integer, (:mileage_lag .+ .01) ./ bin_size))
+
+main_data = @from i in main_data begin
+    @select {
+        i.milage, i.mileage_lag, i.replace, i.interval, i.mileage_binned, i.mileage_binned_lag,
+        new_binned_mileage_lag = i.milage < i.mileage_lag ? 0 : i.mileage_binned_lag
+    } 
+    @collect DataFrame
+end
+# this should be the cleaned data for use on the rest of the problem set
+main_data = @transform(main_data, binned_difference = :mileage_binned - :new_binned_mileage_lag)
+
+################################################################################
+###### 2.3 Questions
+###### 3. Discretized domain and estimate Markov Transition probability
+################################################################################
+
+# get the columns that we want to be easily accessible
+binned_miles = main_data[!,5]
+mile_intervals = main_data[!, 4]
+
+
+mile_intervals = mile_intervals[mile_intervals.>=0]
+# initialize the probability distribution, g
+g = countmap(mile_intervals)
+# get at the maximum state space reached
+max_miles = Int(maximum(keys(g)))
+# create a dictionary for easy accessibility
+g_dict = Dict()
+for i in 0:max_miles
+    g_dict[i] = g[i]/data_size
+end
+#get array from dict
+g_array = [g_dict[i] for i in 0:max_miles]
+# max number of miles in state space
+K_miles = maximum(main_data[!,1]) + Integer(max_interval) + 1
+
+# create the transition matrix from raw data first
+# initializze transition probabilities
+F0_raw = zeros(K_miles,K_miles)
+F1_raw = zeros(K_miles,K_miles)
+# construct both transition probabilities
+for i in 1:K_miles
+    if i < K_miles - max_miles
+        F0_raw[i, i:i+max_miles] .= g_array
+    else
+        F0_raw[i, i:K_miles] .= g_array[1:K_miles-i+1]
+    end
+    F1_raw[i, 1:max_miles+1] .= g_array
 end
 
-# set up Zurcher's utility in vector form
+# then bin the transition probabilities
+F0 = zeros(K, K)
+xk_map = Dict()
+for i in 1:K_miles
+    # first figure out what Xs are bins
+    xk_map[i] = ceil(Integer, i / bin_size)
+end
+# use the map between miles and bins to aggregate up
+for i in 1:K_miles-1
+    for j in 1:K_miles-1
+        F0[xk_map[i], xk_map[j]] += (F0_raw[i,j]/bin_size)
+    end
+end
 
+# correction for the bottom right corner of the transition probability matrix
+for i in 1:K
+    summed = sum(F0[i,:])
+    if summed > 1e-10
+        F0[i, K] += (1-summed)
+    end
+end
+# transpose the matrix so we can left-multiply to match syntax on the slides
+F0 = F0'
+
+################################################################################
+###### 2.3.1 Nested Fixed Point
+###### 1,2,3 Working up to the Rust poly-algorithm
+################################################################################
+
+# set up Zurcher's utility to handle vector inputs
 function utility_vec(d, x, θ)
     if d == 0
         utility = -θ[1] .* x .- (θ[2] .* (x./100).^2)
@@ -47,169 +155,33 @@ function utility_vec(d, x, θ)
     return utility
 end
 
-
-
-
-# how to recover engine replacement - mileage will decrease suddenly
-# first bin all the miles
-K = 10
-mileage = raw_data[!,1]
-bin_size = maximum(mileage ./ K)
-
-
-
-main_data = @transform(raw_data, mileage_binned = ceil.(Integer, :milage ./ bin_size))
-binned_miles = main_data[!,2]
-
-
-data_size = size(raw_data)[1]
-col3 = zeros(data_size)
-col4 = zeros(data_size)
-for i in 1:data_size 
-    if i == 1
-        # should we ignore this or count?
-        col3[i] = 0
-        col4[i] = 0
-    else
-        col3[i] = main_data[i-1, 1]
-        col4[i] = main_data[i-1, 2]
-    end
-end
-# get lags and binned lags
-main_data = insertcols!(main_data, 3, :mileage_lag => col3)
-main_data = insertcols!(main_data, 4, :binned_mileage_lag => col4)
-
-main_data = @from i in main_data begin
-    @select {
-        i.milage, i.mileage_binned, i.mileage_lag, i.binned_mileage_lag,
-        replace = i.milage < i.mileage_lag ? 1 : 0,
-        new_binned_mileage_lag = i.milage < i.mileage_lag ? 0 : i.binned_mileage_lag,
-        difference = i.milage < i.mileage_lag ? i.milage : i.milage - i.mileage_lag
-    } 
-    @collect DataFrame
-end
-
-main_data = @transform(main_data, binned_difference = :mileage_binned - :new_binned_mileage_lag)
-
-
-# ok transform mileage into mileage bins first of all
-
-
-
-increments = main_data[!,8]
-hi = increments[increments.>=0]
-g = countmap(hi)
-# get at the maximum state space reached
-max_bin = Int(maximum(keys(g)))
-
-g_dict = Dict()
-
-
-for i in 0:max_bin
-    g_dict[i] = g[i]/data_size
-end
-#get array from dict
-g_array = [g_dict[i] for i in 0:max_bin]
-
-
-
-difference = main_data[!, 7]
-hi2 = difference[difference.>=0]
-g2 = countmap(hi2)
-# get at the maximum state space reached
-max_miles = Int(maximum(keys(g2)))
-
-g_dict2 = Dict()
-
-
-for i in 0:max_miles
-    g_dict2[i] = g2[i]/data_size
-end
-#get array from dict
-g_array2 = [g_dict2[i] for i in 0:max_miles]
-
-
-mileage = main_data[!,1]
-mile_k = main_data[!,2]
-bin_size = maximum(mileage ./ K)
-
-
-K_miles = maximum(main_data[!,1]) +1
-
-# initializze transition probabilities
-F0_raw = zeros(K_miles,K_miles)
-F1_raw = zeros(K_miles,K_miles)
-
-# construct both transition probabilities
-for i in 1:K_miles
-    if i < K_miles - max_miles
-        F0_raw[i, i:i+max_miles] .= g_array2
-    else
-        F0_raw[i, i:K_miles] .= g_array2[1:K_miles-i+1]
-    end
-    F1_raw[i, 1:max_miles+1] .= g_array2
-end
-
-
-F0 = zeros(K, K)
-
-mile_k = main_data[!,2]
-bin_size = maximum((mileage .+ .1) ./ K)
-new_dict = Dict()
-
-for i in 1:K_miles
-    # first figure out what Xs are bins
-    new_dict[i] = ceil(Integer, i / bin_size)
-end
-
-for i in 1:K_miles-1
-    for j in 1:K_miles-1
-        F0[new_dict[i], new_dict[j]] += (F0_raw[i,j]/bin_size)
-    end
-end
-
-# 
-for i in 1:K
-    summed = sum(F0[i,:])
-    F0[i, K] += (1-summed)
-end
-
-F0 = F0'
-
-
+# the fixed point equation as derived in the writeup
 function gamma(EV, x, θ, F0, β=.999)
     EV0 = EV[1]
     V0 =  utility_vec(0,x,θ) .+ β .* EV 
     V1 = utility_vec(1,x, θ) .+ β .* EV0 
-    # to avoid numerical instability
+    # to avoid numerical instability from TA session slide 43
     Vmax = [max(V0[i], V1[i]) for i in 1:length(V0)]
     return F0 * ( Vmax .+ log.( exp.( V0 .- Vmax ) .+  exp.( V1 .- Vmax ) ) )
 end
-
+# we want to evaluate utility right at the midpoint of each bin
 states = [1:K;] .* bin_size .- (bin_size ./ 2)
-θ1 = [.01, .01, .01]
-EV1 = zeros(K)
-G1 = gamma(EV1, states, θ1, F0)
-G2 = gamma(G1, states, θ1, F0)
 
+# from slide 48, pk is probability of NOT replacing the engine
 function get_pks(EV, x, θ, β=.999)
     EV0 = EV[1]
     V0 = utility_vec(0, x, θ) .+ β .* EV
     V1 = utility_vec(1, x, θ) .+ β .* EV0
-    Vmax = [max(V0[i], V1[i]) for i in 1:length(V0)]
-    #Vmax = maximum(hcat(V0, V1))
-    #println(Vmax)
-    denominator = exp.(V0 .- Vmax) .+ exp.(V1 .- Vmax)
-    numerator = exp.(V1 .- Vmax)
-    #denominator = 1 .+ exp.(V0 .- V1)
-    #pk = 1 ./ denominator
-    #pk[pk .< 1e-90] .= 1e-90
-    #pk[pk .> 1-1e-90] .= 1-1e-90
-    return numerator ./ denominator
+    denominator = 1 .+ exp.(V1 .- V0)
+    return 1 ./ denominator
 end
 
+EV1 = [1:K;]
+θ1 = [.1, .1, .1]
 hi = get_pks(EV1, states, θ1)
 
+# Jacobian of gamma
+# functional form on slide 47
 function gamma_prime(EV, x, θ, F0, β = .999)
     EV0 = EV[1]
     u0 = utility_vec(0, x, θ)
@@ -220,37 +192,33 @@ function gamma_prime(EV, x, θ, F0, β = .999)
     EV0term[:,1] = 1 .- pks
     return β .* F0 * (pks_diag + EV0term)
 end
+# they are identical!!
+J_test = ForwardDiff.jacobian(x -> gamma(x, states, θ1, F0), EV1)
+J_gamma = gamma_prime(EV1, states, θ1, F0)
 
-gamma_prime(EV1, states, θ1, F0)
-get_pks(EV1, states, θ1)
+function gamma_prime(EV, x, θ, F0, β = .999)
+    return ForwardDiff.jacobian(x -> gamma(x, states, θ, F0), EV)
+end
 
 
-function newton_kantarovich(EV_start, x, θ, F0, tol = 1e-14, maxiter = 10000)
+function newton_kantarovich(EV_start, x, θ, F0, tol = 1e-14, maxiter = 10000) 
     EV_old = EV_start
     # initialize delta
     diff = 100
     tol_old = 100
     iter = 0
-    ID = Matrix{Float64}(I, K, K)
     # run the contraction
     x_k = EV_old
     y_k = EV_old
     while diff > tol && iter < maxiter
+        # employ the King-Warner method
         midpoint = (x_k .+ y_k) ./ 2
         Gamma_prime = gamma_prime(midpoint, x, θ, F0)
-        #Gamma_prime = gamma_prime(EV_old, θ, F0)
-        #Gamma = gamma(EV_old, θ, F0)
-        #EV_next = EV_old - (ID - Gamma_prime) \ (EV_old - Gamma)
-        #diff = maximum(abs.(EV_next.-EV_old))
-        #iter += 1
-        #EV_old = EV_next
         Gammak = gamma(x_k, x, θ, F0)
-        xk1 = x_k - (ID - Gamma_prime) \ (x_k - Gammak)
+        xk1 = x_k - (I - Gamma_prime) \ (x_k - Gammak)
         Gammak1 = gamma(xk1, x, θ, F0)
-        yk1 = xk1 - (ID - Gamma_prime) \ (xk1 - Gammak)
+        yk1 = xk1 - (I - Gamma_prime) \ (xk1 - Gammak)
         diff = maximum(abs.(xk1 - x_k))
-        #diff = abs.(tol_new - tol_old)
-        #tol_old = tol_new
         iter += 1
         x_k = xk1
         y_k = yk1
@@ -281,23 +249,15 @@ end
 
 @time EV = solve_fixed_pt(EV1, states, θ1, F0)
 
+################################################################################
+###### 2.3.1 Nested Fixed Point
+###### 4. Likelihood function for any θ
+################################################################################
 
-
-# likelihood time 
-
-function likelihood(θ, d, x, miles, β=.999)
-    states = [1:K;] .* bin_size .- (bin_size ./ 2)
-    EV1 = [1:K;]
+function likelihood(θ, d, x, states, β=.999) 
+    EV1 = zeros(K)
     EV = solve_fixed_pt(EV1, states, θ, F0)
-    u0 = utility_vec(0, miles, θ)
-    u1 = utility_vec(1, miles, θ)
-    EVvec = [EV[i] for i in x]
-    V0 = u0 .+ β .* EVvec
-    V1 = u1 .+ β .* EV[1]
-    pk = 1 ./ (1 .+ exp.(V1 - V0))
-    # get rid of the log(0) problems
-    #pk[pk .< 1e-90] .= 1e-90
-    #pk[pk .> 1-1e-90] .= 1-1e-90
+    pk = get_pks(EV, states, θ)
     likelihood = 0
     for i in x
         pxt = pk[i]
@@ -308,29 +268,36 @@ function likelihood(θ, d, x, miles, β=.999)
 end
 
 miles = main_data[!,1]
-x = main_data[!,2]
-d = main_data[!,5]
+x = binned_miles
+d = main_data[!,3]
 
-θ1 = [.01,.01,.01]
-
-hi = likelihood(θ1, d, x, miles)
+hi = likelihood(θ1, d, x, states)
 
 function f(θ)
-    return likelihood(θ, d, x, miles)
+    return likelihood(θ, d, x, states)
 end
 
-optimize(f, θ1)
+ll_grad_test = ForwardDiff.gradient(y -> likelihood(y, d, x, states), θ1)
 
-function du1(θ, x)
+# this returns something!!
+@time opt = optimize(f, θ1, LBFGS())
+params = Optim.minimizer(opt)
+
+
+################################################################################
+###### 2.3.1 Nested Fixed Point
+###### 4. Likelihood gradient function
+################################################################################
+
+function du0(θ, x)
     return [-x -(x./100).^2 zeros(length(x))]
 end
 
-
-function du0(θ, x)
+function du1(θ, x)
     return [zeros(length(x)) zeros(length(x)) -ones(length(x))]
 end
 
-
+# get ∂Γ/∂θ for ∂EV/∂θ, derivation in writeup
 function dG(EV, θ, x, F0, β=.999)
     # Kx1
     u0 = utility_vec(0, x, θ)
@@ -348,8 +315,11 @@ function dG(EV, θ, x, F0, β=.999)
     return F0 * (numerator ./ denominator)
 end
 
-hi = dG(EV1, θ1, states, F0)
+# checks out - they match! uncomment to verify
+#my_dG = dG(EV1, θ1, states, F0)
+#check_dG = ForwardDiff.jacobian(y -> gamma(EV1, states, y, F0), θ1)
 
+# get ∂EV/∂θ for ∂p_k/∂θ, derivation in the writeup
 function dEV(EV, θ, x)
     # KxK
     Gprime = gamma_prime(EV, x, θ, F0)
@@ -359,28 +329,29 @@ function dEV(EV, θ, x)
     return (I - Gprime) \ dG_dtheta
 end
 
-
+# get ∂p_k/∂θ, derivation in writeup
 function dpk(EV, states, θ, β = 0.999)
-    # these should be Kx1
-    u0 = utility_vec(0, states, θ)
-    u1 = utility_vec(1, states, θ)
-    V0 = u0 .+ β .* EV
-    V1 = u1 .+ β .* EV[1]
     # these should be Kx3
     pk = get_pks(EV, states, θ)
     du1_dtheta = du1(θ, states)
     du0_dtheta = du0(θ, states)
     dEV_dtheta = dEV(EV, θ, states)
-    dEV0 = dEV_dtheta[1]
-    coef = (du1_dtheta .+ β .* dEV0 - du0_dtheta .- β .* dEV_dtheta)
+    dEV0 = repeat(dEV_dtheta[1,:]', outer = [length(states),1])
+    dV1 = du1_dtheta .+ β .* dEV0
+    dV0 = du0_dtheta .+ β .* dEV_dtheta
     # should be Kx3
-    return -pk .* (1 .- pk) .* coef 
+    return -pk .* (1 .- pk) .* (dV1 .- dV0)
 end
+
+# matches! uncomment to verify
+#my_dpk = dpk(EV1, states, θ1)
+#check_dpk = ForwardDiff.jacobian(y -> get_pks(EV1, states, y), θ1)
 
 β = .999
 
-
-function likelihood_grad!(θ, β=.999)
+# using ∂p_k/∂θ, we can put together the likelihood gradient
+# summing over the observed data
+function likelihood_grad(θ)
     EV1 = [1:K;]
     EV = solve_fixed_pt(EV1, states, θ, F0)
     pk = get_pks(EV, states, θ)
@@ -390,6 +361,7 @@ function likelihood_grad!(θ, β=.999)
     pxt_vec = [pk[i,:][1] for i in x]
     # Tx3
     dp_old = [dpk_dtheta[i,:] for i in x]
+    println(dpk_dtheta)
     dpxt_vec = [dpk_dtheta[i,j] for i in x for j in 1:length(θ1)]
     dpxt_vec = reshape(dpxt_vec, (length(θ1), length(x)))
     dpxt_vec = dpxt_vec'
@@ -399,5 +371,14 @@ function likelihood_grad!(θ, β=.999)
 end
 
 
+yoo = likelihood_grad(θ1)
 
-optimize(f, likelihood_grad!, θ1)
+check_dldtheta = ForwardDiff.gradient(y -> likelihood(y, d, x, states), θ1)
+
+# test using AD
+function likelihood_grad_AD(θ)
+    return ForwardDiff.gradient(y -> likelihood(y, d, x, states), θ)
+end
+θ1 = [.01, .01, .01]
+hai = likelihood_grad_AD(θ1)
+
