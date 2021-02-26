@@ -277,11 +277,9 @@ function f(θ)
     return likelihood(θ, d, x, states)
 end
 
-ll_grad_test = ForwardDiff.gradient(y -> likelihood(y, d, x, states), θ1)
-
 # this returns something!!
-@time opt = optimize(f, θ1, LBFGS())
-params = Optim.minimizer(opt)
+#@time opt = optimize(f, θ1, LBFGS())
+#params = Optim.minimizer(opt)
 
 
 ################################################################################
@@ -351,7 +349,7 @@ end
 
 # using ∂p_k/∂θ, we can put together the likelihood gradient
 # summing over the observed data
-function likelihood_grad(θ)
+function likelihood_grad!(θ)
     EV1 = [1:K;]
     EV = solve_fixed_pt(EV1, states, θ, F0)
     pk = get_pks(EV, states, θ)
@@ -360,25 +358,18 @@ function likelihood_grad(θ)
     # get a Tx1
     pxt_vec = [pk[i,:][1] for i in x]
     # Tx3
-    dp_old = [dpk_dtheta[i,:] for i in x]
-    println(dpk_dtheta)
     dpxt_vec = [dpk_dtheta[i,j] for i in x for j in 1:length(θ1)]
     dpxt_vec = reshape(dpxt_vec, (length(θ1), length(x)))
     dpxt_vec = dpxt_vec'
     # check dimensions to make sure this returns a 3x1
-    result_vec = (d ./ (1 .- pxt_vec)) .* (dpxt_vec) .+ ((1 .- d) ./ pxt_vec) .* dpxt_vec
+    result_vec = -((d ./ (1 .- pxt_vec)) .* (dpxt_vec) .+ ((1 .- d) ./ pxt_vec) .* dpxt_vec)
     return sum(result_vec, dims = 1)
 end
 
+# they match!! uncomment to verify
+#my_dldtheta = likelihood_grad(θ1)
+#check_dldtheta = ForwardDiff.gradient(y -> likelihood(y, d, x, states), θ1)
 
-yoo = likelihood_grad(θ1)
-
-check_dldtheta = ForwardDiff.gradient(y -> likelihood(y, d, x, states), θ1)
-
-# test using AD
-function likelihood_grad_AD(θ)
-    return ForwardDiff.gradient(y -> likelihood(y, d, x, states), θ)
-end
-θ1 = [.01, .01, .01]
-hai = likelihood_grad_AD(θ1)
-
+# oh man why is this not working argh
+@time final_opt = optimize(f, likelihood_grad!, θ1)
+theta = Optim.minimizer(final_opt)
