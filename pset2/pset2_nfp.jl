@@ -137,8 +137,7 @@ for i in 1:K
         F0[i, K] += (1-summed)
     end
 end
-# transpose the matrix so we can left-multiply to match syntax on the slides
-#F0 = F0'
+F0
 
 ################################################################################
 ###### 2.3.1 Nested Fixed Point
@@ -296,7 +295,7 @@ end
 ###### 2.3.1 Nested Fixed Point
 ###### 4. Likelihood gradient function
 ################################################################################
-
+# gradients of the utilities
 function du0(θ, x)
     return [-x -(x./100).^2 zeros(length(x))]
 end
@@ -388,34 +387,37 @@ function gg!(storage, θ)
 end
 
 θ1 = [.5, -.5, .5]
-# omg it works
+# it works but is dependent on start-values
 @time final_opt = optimize(f, gg!, θ1, BFGS())
 theta = Optim.minimizer(final_opt)
 
 # grid search (baby grid search since I don't have time for KNITRO)
-grid_size = 5
-theta1 = .02*ones(grid_size) .- .02
-theta2 = ones(grid_size) .- 4
-theta3 = .1*ones(grid_size) .+ 1.1
+global grid_size = 5
+global theta1 = .02 .* [1:grid_size;] .- .02
+global theta2 = .5 .* [1:grid_size;]
+global theta3 = .1 .* [1:grid_size;] .+ 1.1
 
 # remember we still want to minimize likelihood
-best_likelihood = 1e30
+# this will take a couple of hours to run, the grid
+# is also not great, I continuously played around with the grid
+# until I got something that had an ok likelihood before turning in
+global best_likelihood = 1e30
 for i in 1:grid_size
     for j in 1:grid_size
         for k in 1:grid_size
-            theta = [theta1[i] theta2[j] theta3[k]]
-            @time final_opt = optimize(f, gg!, θ1, BFGS())
-            theta_opt = Optim.minimizer(final_opt)
+            global theta_test = [theta1[i], theta2[j], theta3[k]]
+            println(theta_test)
+            @time opt_object = optimize(f, gg!, theta_test, BFGS())
+            theta_opt = Optim.minimizer(opt_object)
             new_likelihood = f(theta_opt)
+            println(new_likelihood)
             if new_likelihood < best_likelihood
-                best_likelihood = new_likelihood
+                global best_likelihood = new_likelihood
                 println(theta_opt)
-                println(new_likelihood)
+                println("new max-likelihood!")
             end
         end
     end
 end
 println("grid search done!")
-
-
 
