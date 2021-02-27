@@ -393,4 +393,29 @@ end
 theta = Optim.minimizer(final_opt)
 
 # grid search (baby grid search since I don't have time for KNITRO)
+grid_size = 5
+theta1 = .02*ones(grid_size) .- .02
+theta2 = ones(grid_size) .- 4
+theta3 = .1*ones(grid_size) .+ 1.1
+
+# remember we still want to minimize likelihood
+best_likelihood = 1e30
+for i in 1:grid_size
+    for j in 1:grid_size
+        for k in 1:grid_size
+            theta = [theta1[i] theta2[j] theta3[k]]
+            @time final_opt = optimize(f, gg!, θ1, BFGS())
+            theta_opt = Optim.minimizer(final_opt)
+            new_likelihood = f(theta_opt)
+            if new_likelihood < best_likelihood
+                best_likelihood = new_likelihood
+                println(theta_opt)
+                println(new_likelihood)
+            end
+        end
+    end
+end
+println("grid search done!")
+
+
 
