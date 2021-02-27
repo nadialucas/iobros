@@ -133,12 +133,12 @@ end
 # correction for the bottom right corner of the transition probability matrix
 for i in 1:K
     summed = sum(F0[i,:])
-    if summed > 1e-10
+    if (1-summed) > 1e-10
         F0[i, K] += (1-summed)
     end
 end
 # transpose the matrix so we can left-multiply to match syntax on the slides
-F0 = F0'
+#F0 = F0'
 
 ################################################################################
 ###### 2.3.1 Nested Fixed Point
@@ -176,9 +176,9 @@ function get_pks(EV, x, θ, β=.999)
     return 1 ./ denominator
 end
 
+# a random starting point to start comparing gradients
 EV1 = [1:K;]
 θ1 = [.1, .1, .1]
-hi = get_pks(EV1, states, θ1)
 
 # Jacobian of gamma
 # functional form on slide 47
@@ -196,12 +196,16 @@ end
 J_test = ForwardDiff.jacobian(x -> gamma(x, states, θ1, F0), EV1)
 J_gamma = gamma_prime(EV1, states, θ1, F0)
 
-function gamma_prime(EV, x, θ, F0, β = .999)
+# this is a helper function to deal with a type error when doing 
+# automatic differentation as a check down the line 
+# it is not used in any of the actual calculations
+function gamma_prime_ad(EV, x, θ, F0, β = .999)
     return ForwardDiff.jacobian(x -> gamma(x, states, θ, F0), EV)
 end
 
-
-function newton_kantarovich(EV_start, x, θ, F0, tol = 1e-14, maxiter = 10000) 
+# this is the step we switch to in the middle of the fixed point iteration
+# it follows closely with the slides and employs the King-Werner method
+function newton_kantarovich(EV_start, x, θ, F0, ad = false, tol = 1e-14, maxiter = 10000) 
     EV_old = EV_start
     # initialize delta
     diff = 100
@@ -211,9 +215,13 @@ function newton_kantarovich(EV_start, x, θ, F0, tol = 1e-14, maxiter = 10000)
     x_k = EV_old
     y_k = EV_old
     while diff > tol && iter < maxiter
-        # employ the King-Warner method
+        # employ the King-Werner method
         midpoint = (x_k .+ y_k) ./ 2
-        Gamma_prime = gamma_prime(midpoint, x, θ, F0)
+        if ad
+            Gamma_prime = gamma_prime_ad(midpoint, x, θ, F0)
+        else
+            Gamma_prime = gamma_prime(midpoint, x, θ, F0)
+        end
         Gammak = gamma(x_k, x, θ, F0)
         xk1 = x_k - (I - Gamma_prime) \ (x_k - Gammak)
         Gammak1 = gamma(xk1, x, θ, F0)
@@ -228,7 +236,7 @@ function newton_kantarovich(EV_start, x, θ, F0, tol = 1e-14, maxiter = 10000)
     return y_k
 end
 
-function solve_fixed_pt(EV_start, x, θ, F0, β = .999, tol = 1e-14, maxiter = 1000)
+function solve_fixed_pt(EV_start, x, θ, F0, ad = false, β = .999, tol = 1e-14, maxiter = 1000)
     EV_old = EV_start
     # initialize delta
     diff_old = 100
@@ -244,7 +252,7 @@ function solve_fixed_pt(EV_start, x, θ, F0, β = .999, tol = 1e-14, maxiter = 1
         diff_old = diff_new
         iter += 1
     end
-    final_EV = newton_kantarovich(EV_old, x, θ, F0)
+    final_EV = newton_kantarovich(EV_old, x, θ, F0, ad)
 end
 
 @time EV = solve_fixed_pt(EV1, states, θ1, F0)
@@ -254,9 +262,10 @@ end
 ###### 4. Likelihood function for any θ
 ################################################################################
 
-function likelihood(θ, d, x, states, β=.999) 
+# option for AD down the line to check with all AD in the pipeline
+function likelihood(θ, d, x, states, ad = false, β=.999) 
     EV1 = zeros(K)
-    EV = solve_fixed_pt(EV1, states, θ, F0)
+    EV = solve_fixed_pt(EV1, states, θ, F0, ad)
     pk = get_pks(EV, states, θ)
     likelihood = 0
     for i in x
@@ -273,11 +282,12 @@ d = main_data[!,3]
 
 hi = likelihood(θ1, d, x, states)
 
+# wrapper for 
 function f(θ)
     return likelihood(θ, d, x, states)
 end
 
-# this returns something!!
+# this returns something - sanity checkpoint
 #@time opt = optimize(f, θ1, LBFGS())
 #params = Optim.minimizer(opt)
 
@@ -362,6 +372,7 @@ function likelihood_grad(θ)
     dpxt_vec = reshape(dpxt_vec, (length(θ1), length(x)))
     dpxt_vec = dpxt_vec'
     # check dimensions to make sure this returns a 3x1
+    # and recall we are minimizing likelihood so this is negative
     result_vec = -((d ./ (1 .- pxt_vec)) .* (dpxt_vec) .+ ((1 .- d) ./ pxt_vec) .* dpxt_vec)
     result = sum(result_vec, dims = 1)
     return result[:]
@@ -369,14 +380,17 @@ end
 
 # they match!! uncomment to verify
 my_dldtheta = likelihood_grad(θ1)
-check_dldtheta = ForwardDiff.gradient(y -> likelihood(y, d, x, states), θ1)
+check_dldtheta = ForwardDiff.gradient(y -> likelihood(y, d, x, states, true), θ1)
 
 
 function gg!(storage, θ)
-    hi = likelihood_grad(θ)
-    storage .= hi
+    storage .= likelihood_grad(θ)
 end
 
-# oh man why is this not working argh
+θ1 = [.5, -.5, .5]
+# omg it works
 @time final_opt = optimize(f, gg!, θ1, BFGS())
 theta = Optim.minimizer(final_opt)
+
+# grid search (baby grid search since I don't have time for KNITRO)
+
