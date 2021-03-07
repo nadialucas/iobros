@@ -58,7 +58,7 @@ lot_stamps <- stamps %>%
 
 # pct lots won + total lots 
 more_stamps <- stamps %>%
-  group_by(house,lot) %>%
+  group_by(house,lot,date) %>%
   summarise(won=sum(test)) %>%
   mutate(ones = 1) %>%
   group_by(house) %>% 
@@ -73,16 +73,16 @@ right_join <- merge(right_join, more_stamps, by = "house", all.y = TRUE)
 
 # mean + sd of knockout/target bids
 number_stamps <- stamps %>%
-  group_by(house,lot) %>%
-  mutate(ringers = max(bidder)) %>%
+  group_by(house,lot,date) %>%
+  mutate(ringers =n()) %>%
   group_by(ringers) %>%
   summarise(house_target=mean(target), house_target_sd = sd(target), 
             house_knockout = mean(bid), house_knockout_sd = sd(bid))
   
 # # pct lots won + total lots 
 bidder_stamps <- stamps %>%
-  group_by(house,lot) %>%
-  mutate(ringers = max(bidder)) %>%
+  group_by(house,lot,date) %>%
+  mutate(ringers = n()) %>%
   distinct(lot, .keep_all = TRUE) %>%
   mutate(ones = 1) %>%
   group_by(ringers) %>%
@@ -92,9 +92,10 @@ bidder_stamps <- stamps %>%
 ### remove all lots where there are more than 2 bidders
 
 redo <- stamps %>%
-  group_by(house,lot) %>%
-  mutate(ringers = max(bidder)) 
+  group_by(house,lot,date) %>%
+  mutate(ringers = n()) %>%
   ungroup
 
-final <- subset(redo, ringers < 3)
+final <- subset(redo, ringers == 2)
+
 
