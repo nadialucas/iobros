@@ -48,6 +48,7 @@ stamps <-
   mutate(ringers =n()) %>% # number of ring participants
   mutate(max_bid = max(ko_bid)) %>% # highest bid in knockout
   mutate(ring_winner = ifelse(target_price <= max_bid & ko_bid == max_bid, 1, 0)) %>% # ring won
+  mutate(ring_won = ifelse(target_price <= max_bid, 1, 0)) %>%
   mutate(highest_ringer = ifelse(ko_bid == max_bid, 1, 0)) %>% # highest ring bidder
   mutate(payer = ifelse(payment>0,1,0)) %>% # made side payment
   mutate(receiver = ifelse(payment<0,1,0)) %>% # received side payment
@@ -56,13 +57,18 @@ stamps <-
   mutate(ones = 1) %>%
   ungroup
 
+# collapse to lot level
+lot_level = stamps %>%
+  group_by(house, lot, date) %>%
+  summarise(target_price = mean(target_price), max_bid = mean(max_bid), avg_est = mean(avg_est), ring_won = mean(ring_won), ones = 1, ringers = mean(ringers))
+
 # summary stats by auction house
-table1 <- stamps %>% 
-  mutate(rwv = ifelse(ring_winner==1,ring_winner * avg_est,0)) %>%
+table1 <- lot_level %>% 
+  mutate(rwv = ifelse(ring_won==1,ring_won * avg_est,0)) %>%
   group_by(house) %>% 
   summarise(house_target = mean(target_price), house_target_sd = sd(target_price), 
-            house_knockout = mean(ko_bid), house_knockout_sd = sd(ko_bid),
-            ring_val = sum(rwv), total_val = sum(avg_est), ring_total = sum(ring_winner),
+            house_knockout = mean(max_bid), house_knockout_sd = sd(max_bid),
+            ring_val = sum(rwv), total_val = sum(avg_est), ring_total = sum(ring_won),
             lots_total = sum(ones)) %>%
   mutate(pct_value = ring_val / total_val) %>%
   mutate(pct_won = ring_total/lots_total) %>%
@@ -74,8 +80,9 @@ table2 <- stamps %>%
   group_by(ringers) %>%
   summarise(ringers_target=mean(target_price), ringers_target_sd = sd(target_price), 
             ringers_knockout = mean(ko_bid), ringers_knockout_sd = sd(ko_bid),
-            ring_total=sum(ring_winner), lots_total = sum(ones)) %>%
+            ring_total=sum(ring_won), lots_total = sum(ones)) %>%
   mutate(pct_won = ring_total/lots_total) %>%
+  mutate(lots_total = lots_total/ringers) %>%
   select(ringers,ringers_target,ringers_target_sd,ringers_knockout,ringers_knockout_sd,
          pct_won,lots_total)
 
