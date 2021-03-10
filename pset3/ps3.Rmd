@@ -1,0 +1,67 @@
+---
+title: "Problem Set 3"
+author: "Nadia Lucas and Fern Ramoutar"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+
+
+
+
+```{r clean data, echo = FALSE}
+library("kdensity")
+cleaned_stamps <-
+  read_csv("ps3_julia.csv")
+lot_level = cleaned_stamps %>%
+  group_by(house, lot, date) %>%
+  summarise(target_price = mean(target_price), max_bid = mean(max_bid), avg_est = mean(avg_est), ring_won = mean(ring_won), ones = 1, ringers = mean(ringers))
+
+library("fastDummies")
+library(tidyverse)
+with_dummies <- cleaned_stamps %>% fastDummies::dummy_cols(select_columns = "bidder")  %>%
+  fastDummies::dummy_cols(select_columns = "us") %>%
+  fastDummies::dummy_cols(select_columns = "no_value") %>%
+  mutate(lnb = log(ko_bid))
+
+
+# do we want to do this with lots too? I'm unsure how to translate the non-ring distribution out to the kernel
+
+```
+# What is going on with the target dummy here - the only thing not implemented
+```{r regression}
+fit1 <- lm(lnb ~ est_min + est_max + catalog_price + grade_min + grade_max + us_0 + us_1 + no_value_0 + no_value_1 + bidder_1 + bidder_2 + bidder_3 +
+             bidder_4 + bidder_5 + bidder_6 + bidder_7 + bidder_8 + bidder_9 + bidder_10 + bidder_11, data = with_dummies)
+summary(fit1)
+```
+```{r get b hat}
+bhat = predict(fit1, newdata = with_dummies)
+```
+
+```{r density time}
+# OK now I'm just unsure whether we want to be using bhat or something else as a density
+h_bar = kdensity(exp(bhat), start = "gumbel", kernel = "gaussian")
+#h_bar = kdensity(lot_level$target_price, start = "gumbel", kernel = "gaussian")
+
+
+# Silverman's rule of thumb
+library(sROC)
+bwidth_silverman = bw.nrd0(lot_level$max_bid)
+G_m = kCDF(lot_level$max_bid, bw= bwidth_silverman, kernel = c("normal", "epanechnikov"))
+print(h_bar(100))
+print(G_m(2000))
+# I've confused myself with this empirical cdf stuff now so im going to bed
+# but it's either this kCDF thing or ecdf thing and i dont know enough math to figure it out rn
+
+A = integrate(function(x) h_bar(x)/(1-G_m(x)), lower = -Inf, upper = Inf)$value
+print(lol)
+```

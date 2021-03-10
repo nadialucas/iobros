@@ -44,6 +44,7 @@ stamps <-
   rename(no_grade = "No Grade") %>%
   rename(us = "ExAlusively US") %>%
   rename(no_value = "No Value") %>%
+  rename(data_id = "Data NuEer") %>%
   group_by(house,lot,date) %>%
   mutate(ringers =n()) %>% # number of ring participants
   mutate(max_bid = max(ko_bid)) %>% # highest bid in knockout
