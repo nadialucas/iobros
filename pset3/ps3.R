@@ -118,8 +118,45 @@ ggplot(stamps) +
            position = "dodge", stat = "summary", fun.y = "mean")
 
 #================================================#
-# final clean up
+# create structural dataset
 #================================================#
 
-ps3_julia <- subset(stamps, ringers == 2) 
-write.csv(ps3_julia, 'ps3_julia.csv', row.names = FALSE)
+ok <- subset(stamps, ringers == 2) 
+
+# auction characteristics 
+auctions <- ok %>%
+  select(house,date,lot,est_min,est_max,catalog_price,grade_min,grade_max,us,no_value) %>%
+  distinct()
+
+# knockout bids
+ko <-  ok %>%
+  select(house,date,lot,bidder,ko_bid) %>%
+  mutate(bidder1 = ifelse(bidder == 1,1,0)) %>%
+  mutate(bidder2 = ifelse(bidder == 2,1,0)) %>%
+  select(house,date,lot,ko_bid,bidder1,bidder2) %>%
+  rename(bid = "ko_bid") %>%
+  mutate(target = 0)
+  
+# target bids
+target <- ok %>%
+  group_by(house,date,lot) %>%
+  summarise(bid = mean(target_price)) %>%
+  mutate(target = 1) %>%
+  mutate(bidder1 = 0) %>%
+  mutate(bidder2 = 0)
+
+# append target + knockout bids
+bind <- rbind(ko, target)
+
+# merge bids with auction characteristics
+stamps_final <- bind %>%
+  inner_join(auctions) %>%
+  mutate(lnb = log(bid))
+
+# first stage regression
+fit1 <- lm(lnb ~ est_min + est_max + catalog_price + grade_min + grade_max + us 
+           + bidder1 + bidder2 + target, data = stamps_final)
+
+# predicted bids
+stamps_final$bhat <- fitted(fit1) 
+  
