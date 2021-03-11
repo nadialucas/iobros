@@ -37,8 +37,8 @@ library(ggmap)
 library(ggthemes)
 library(mapview)
 library(webshot)
-library(ggpubr)
-library(Hmisc)
+#library(ggpubr)
+#library(Hmisc)
 library(knitr)
 
 # set directory
@@ -140,11 +140,17 @@ ggplot(stamps) +
   geom_bar(aes(bidder, payment, fill = as.factor(small_lots)), 
            position = "dodge", stat = "summary", fun.y = "mean")
 
+# weak bidder time
+good_bidder <- stamps %>%
+  group_by(bidder) %>%
+  summarise(total_pay = sum(payment), pct_won = sum(highest_ringer)/sum(ones)) 
+
+# looks like we should drop 2 and 10
+
 #================================================#
 # create structural dataset
 #================================================#
-
-ok <- subset(stamps, ringers == 2) 
+ok <- subset(stamps_noweak, ringers == 2) 
 
 # auction characteristics 
 auctions <- ok %>%
@@ -185,7 +191,7 @@ stamps_final$bhat <- fitted(fit1)
 
 stamps_final <- stamps_final %>%
   mutate(ln_resid = lnb - bhat) %>%
-  mutate(resid = exp(ln_resid))
+  mutate(resid = bid - exp(bhat))
   
 ```
 
@@ -210,7 +216,7 @@ gm_fun <- approxfun(gm$x, gm$y)
 Gm_fun <- approxfun(gm$x, Gm)
 
 # Now integrate
-A = integrate(function(x) (hr_bar_fun(x)/(1-Gm_fun(x))), lower = max(min(hr_bar$x), min(gm$x)), upper = max(gm$x)-.001)$value
+A = 1/integrate(function(x) (hr_bar_fun(x)/(1-Gm_fun(x))), lower = max(min(hr_bar$x), min(gm$x)), upper = max(gm$x)-.001)$value
 print(A)
 
 # create hr
@@ -262,17 +268,21 @@ g_i_fun <- approxfun(xi_array[1,], g_i)
 G_i_fun <- approxfun(xi_array[1,], G_i)
 ```
 
-# Now we plug it all in to equantion 2
+# Now we plug it all in to equation 2
 Somehow we recover using a triweight kernel? idk what's going on with that
 ```{r eqn 2}
+print(minbid)
+minbid = min(hr_bar$x)
+print(maxbid)
 v <- function(b) {
+  print(b)
   num = 0.5 * Hr(b)*(1-G_i_fun(b))
   denom = hr(b)*G_i_fun(b) + Hr(b)*g_i_fun(b)
   b - num/denom
 }
-bids = seq(from = minbid, to = maxbid, by=.1)
+bids = seq(minbid, maxbid, by = 20)
 
 vals = lapply(bids, v)
 # lol yikes
-plot(bids, vals)
+plot(bids[vals>0], vals[vals>0])
 ```
