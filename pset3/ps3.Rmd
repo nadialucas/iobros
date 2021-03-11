@@ -150,7 +150,7 @@ good_bidder <- stamps %>%
 #================================================#
 # create structural dataset
 #================================================#
-ok <- subset(stamps_noweak, ringers == 2) 
+ok <- subset(stamps, ringers == 2) 
 
 # auction characteristics 
 auctions <- ok %>%
@@ -184,17 +184,19 @@ stamps_final <- bind %>%
 ```{r regresion and predict}
 # first stage regression
 fit1 <- lm(lnb ~ est_min + est_max + catalog_price + grade_min + grade_max + factor(us) + factor(no_value) 
-           + factor(bidder) + factor(target), data = stamps_final)
+           + factor(bidder) + factor(target) + factor(auction_id), data = stamps_final)
 
 # predicted bids
-stamps_final$bhat <- fitted(fit1) 
+stamps_final$lnbhat <- stamps_final$lnb - (fit1$coefficients[2]*stamps_final$est_min + fit1$coefficients[3]*stamps_final$est_max +
+  fit1$coefficients[4]*stamps_final$catalog_price + fit1$coefficients[5]*stamps_final$grade_min + fit1$coefficients[6]*stamps_final$grade_max + 
+  fit1$coefficients[7]*stamps_final$us + fit1$coefficients[8]*stamps_final$no_value)
 
 stamps_final <- stamps_final %>%
-  mutate(ln_resid = lnb - bhat) %>%
-  mutate(resid = bid - exp(bhat))
+  mutate(bhat = exp(lnbhat))
   
 ```
-
+# Using Silverman's rule to get densities
+# and adding up to get a CDF
 ```{r density time}
 
 
@@ -216,7 +218,7 @@ gm_fun <- approxfun(gm$x, gm$y)
 Gm_fun <- approxfun(gm$x, Gm)
 
 # Now integrate
-A = 1/integrate(function(x) (hr_bar_fun(x)/(1-Gm_fun(x))), lower = max(min(hr_bar$x), min(gm$x)), upper = max(gm$x)-.001)$value
+A = 1/integrate(function(x) (hr_bar_fun(x)/(1-Gm_fun(x))), lower = max(min(hr_bar$x), min(gm$x)), upper = max(gm$x)-1)$value
 print(A)
 
 # create hr
@@ -285,4 +287,9 @@ bids = seq(minbid, maxbid, by = 20)
 vals = lapply(bids, v)
 # lol yikes
 plot(bids[vals>0], vals[vals>0])
+```
+
+```{r plot 2}
+x = xi_array[1,]
+plot(x[x>0], G_i[x>0])
 ```
