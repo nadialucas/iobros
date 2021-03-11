@@ -218,7 +218,7 @@ hr <- function(r) {
   A*hr_bar_fun(r) / (1-Gm_fun(r))
 }
 Hr <- function(r) {
-  A*integrate(function(x) (hr_bar_fun(x)/(1-Gm_fun(x))), lower = max(min(hr_bar$x), min(gm$x)), upper = r)$value
+  A*integrate(function(x) (hr_bar_fun(x)/(1-Gm_fun(x))), lower = max(min(hr_bar$x), min(gm$x)), upper = r, stop.on.error = FALSE)$value
 }
 ```
 # Ok now time for some individuals level densities
@@ -247,6 +247,7 @@ alphas <- ok %>%
   summarise(alpha = sum(ones)/auction_count) %>%
   select(bidder, alpha)
 
+# construct g_i and G_i
 G_i <- c(1:512)*0
 g_i <- c(1:512)*0
 for(b in 1:11) {
@@ -255,9 +256,23 @@ for(b in 1:11) {
     g_i[g] = g_i[g] + alpha*gi_array[b,g]
     G_i[g] = G_i[g] + alpha*Gi_array[b,g]
   }
-  #g_i = g_i + alpha*gi_array[b]
 }
 
-# construct g_i and G_i
+g_i_fun <- approxfun(xi_array[1,], g_i)
+G_i_fun <- approxfun(xi_array[1,], G_i)
+```
 
+# Now we plug it all in to equantion 2
+Somehow we recover using a triweight kernel? idk what's going on with that
+```{r eqn 2}
+v <- function(b) {
+  num = 0.5 * Hr(b)*(1-G_i_fun(b))
+  denom = hr(b)*G_i_fun(b) + Hr(b)*g_i_fun(b)
+  b - num/denom
+}
+bids = seq(from = minbid, to = maxbid, by=.1)
+
+vals = lapply(bids, v)
+# lol yikes
+plot(bids, vals)
 ```
