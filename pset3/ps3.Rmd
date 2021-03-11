@@ -19,49 +19,245 @@ When you click the **Knit** button a document will be generated that includes bo
 
 
 ```{r clean data, echo = FALSE}
-library("kdensity")
-cleaned_stamps <-
-  read_csv("ps3_julia.csv")
-lot_level = cleaned_stamps %>%
+
+# title:    ps3.R
+# authors:  nadia lucas and fern ramoutar
+# updated:  march 2021
+
+#================================================#
+# set up
+#================================================#
+
+# packages
+library(tidyverse)
+library(tigris)
+library(sf)
+library(RColorBrewer)
+library(ggmap)
+library(ggthemes)
+library(mapview)
+library(webshot)
+library(ggpubr)
+library(Hmisc)
+library(knitr)
+
+# set directory
+#ddir <- "/Users/fernramoutar/Dropbox/github/iobros/pset3"
+#setwd(ddir)
+
+#================================================#
+# question 1
+#================================================#
+
+# load dataset
+stamps <-
+  read_csv("ps3.csv") %>%
+  rename(target_price = "realisation in final auAtion") %>%
+  rename(ko_bid = "bid") %>%
+  rename(est_min_dum = "EstDated MinDum") %>%
+  rename(est_max_dum = "EstDated MaxDum") %>%
+  rename(payment = "Net  Payment") %>%
+  rename(catalog_price = "Aatalog PriAe") %>%
+  rename(catalog_du10y = "Aatalog Du10y") %>%
+  rename(est_min = "EstDate Min") %>%
+  rename(est_max = "EstDate Max") %>%
+  rename(grade_min = "Grade Min") %>%
+  rename(grade_max = "Grade Max") %>%
+  rename(no_grade = "No Grade") %>%
+  rename(us = "ExAlusively US") %>%
+  rename(no_value = "No Value") %>%
+  rename(data_id = "Data NuEer") %>%
+  group_by(house,lot,date) %>%
+  mutate(auction_id = max(data_id)) %>%
+  mutate(ringers =n()) %>% # number of ring participants
+  mutate(max_bid = max(ko_bid)) %>% # highest bid in knockout
+  mutate(ring_winner = ifelse(target_price <= max_bid & ko_bid == max_bid, 1, 0)) %>% # ring won
+  mutate(ring_won = ifelse(target_price <= max_bid, 1, 0)) %>%
+  mutate(highest_ringer = ifelse(ko_bid == max_bid, 1, 0)) %>% # highest ring bidder
+  mutate(payer = ifelse(payment>0,1,0)) %>% # made side payment
+  mutate(receiver = ifelse(payment<0,1,0)) %>% # received side payment
+  mutate(avg_est = (est_min + est_max)/2) %>% # average estimated value of lot
+  mutate(small_lots = ifelse(avg_est<10000, 1, 0)) %>% # lots below $10,000
+  mutate(ones = 1) %>%
+  ungroup
+
+# collapse to lot level
+lot_level = stamps %>%
   group_by(house, lot, date) %>%
   summarise(target_price = mean(target_price), max_bid = mean(max_bid), avg_est = mean(avg_est), ring_won = mean(ring_won), ones = 1, ringers = mean(ringers))
 
-library("fastDummies")
-library(tidyverse)
-with_dummies <- cleaned_stamps %>% fastDummies::dummy_cols(select_columns = "bidder")  %>%
-  fastDummies::dummy_cols(select_columns = "us") %>%
-  fastDummies::dummy_cols(select_columns = "no_value") %>%
-  mutate(lnb = log(ko_bid))
+# summary stats by auction house
+table1 <- lot_level %>% 
+  mutate(rwv = ifelse(ring_won==1,ring_won * avg_est,0)) %>%
+  group_by(house) %>% 
+  summarise(house_target = mean(target_price), house_target_sd = sd(target_price), 
+            house_knockout = mean(max_bid), house_knockout_sd = sd(max_bid),
+            ring_val = sum(rwv), total_val = sum(avg_est), ring_total = sum(ring_won),
+            lots_total = sum(ones)) %>%
+  mutate(pct_value = ring_val / total_val) %>%
+  mutate(pct_won = ring_total/lots_total) %>%
+  select(house,house_target,house_target_sd,house_knockout,house_knockout_sd,
+         pct_won,pct_value,lots_total) # what is a sale?
 
+# summary stats by number of bidders
+table2 <- stamps %>%
+  group_by(ringers) %>%
+  summarise(ringers_target=mean(target_price), ringers_target_sd = sd(target_price), 
+            ringers_knockout = mean(ko_bid), ringers_knockout_sd = sd(ko_bid),
+            ring_total=sum(ring_won), lots_total = sum(ones)) %>%
+  mutate(pct_won = ring_total/lots_total) %>%
+  mutate(lots_total = lots_total/ringers) %>%
+  select(ringers,ringers_target,ringers_target_sd,ringers_knockout,ringers_knockout_sd,
+         pct_won,lots_total)
 
-# do we want to do this with lots too? I'm unsure how to translate the non-ring distribution out to the kernel
+#================================================#
+# question 2
+#================================================#
 
+# knockout outcomes by ring member
+table5 <- stamps %>%
+  group_by(bidder) %>%
+  add_tally() %>%
+  rename(n_any = "n") %>%
+  mutate(highest_any=sum(highest_ringer)) %>%
+  mutate(pctkoany = highest_any/n_any) %>%
+  ungroup %>%
+  subset(ringers>=2) %>%
+  group_by(bidder) %>%
+  add_tally() %>%
+  mutate(highest=sum(highest_ringer)) %>%
+  mutate(pctko = highest/n) %>%
+  mutate(paying = sum(payer)) %>%
+  mutate(receiving=sum(receiver)) %>%
+  mutate(pctpaying = paying/n) %>%
+  mutate(pctreceiving = receiving/n) %>%
+  summarise(highest_total_any = mean(highest_any), pct_ko_any = mean(pctkoany), 
+            highest_total = mean(highest), pct_ko = mean(pctko), 
+            pct_paying=mean(pctpaying), pct_receiving = mean(pctreceiving))
+
+# net side payments
+ggplot(stamps) + 
+  geom_bar(aes(bidder, payment, fill = as.factor(small_lots)), 
+           position = "dodge", stat = "summary", fun.y = "mean")
+
+#================================================#
+# create structural dataset
+#================================================#
+
+ok <- subset(stamps, ringers == 2) 
+
+# auction characteristics 
+auctions <- ok %>%
+  select(house,date,lot,est_min,est_max,catalog_price,grade_min,grade_max,us,no_value,auction_id,ring_won) %>%
+  distinct()
+
+# knockout bids
+ko <-  ok %>%
+  select(house,date,lot,bidder,ko_bid,ring_winner,highest_ringer,auction_id) %>%
+  rename(bid = "ko_bid") %>%
+  mutate(target = 0)
+  
+# target bids
+target <- ok %>%
+  group_by(house,date,lot) %>%
+  summarise(bid = mean(target_price), auction_id = mean(auction_id)) %>%
+  mutate(target = 1) %>%
+  mutate(bidder = 0) %>%
+  mutate(ring_winner = 3) %>%
+  mutate(highest_ringer = 3)
+
+# append target + knockout bids
+bind <- rbind(ko, target)
+
+# merge bids with auction characteristics
+stamps_final <- bind %>%
+  inner_join(auctions) %>%
+  mutate(lnb = log(bid))
 ```
-# What is going on with the target dummy here - the only thing not implemented
-```{r regression}
-fit1 <- lm(lnb ~ est_min + est_max + catalog_price + grade_min + grade_max + us_0 + us_1 + no_value_0 + no_value_1 + bidder_1 + bidder_2 + bidder_3 +
-             bidder_4 + bidder_5 + bidder_6 + bidder_7 + bidder_8 + bidder_9 + bidder_10 + bidder_11, data = with_dummies)
-summary(fit1)
-```
-```{r get b hat}
-bhat = predict(fit1, newdata = with_dummies)
+
+```{r regresion and predict}
+# first stage regression
+fit1 <- lm(lnb ~ est_min + est_max + catalog_price + grade_min + grade_max + factor(us) + factor(no_value) 
+           + factor(bidder) + factor(target), data = stamps_final)
+
+# predicted bids
+stamps_final$bhat <- fitted(fit1) 
+
+stamps_final <- stamps_final %>%
+  mutate(ln_resid = lnb - bhat) %>%
+  mutate(resid = exp(ln_resid))
+  
 ```
 
 ```{r density time}
-# OK now I'm just unsure whether we want to be using bhat or something else as a density
-h_bar = kdensity(exp(bhat), start = "gumbel", kernel = "gaussian")
-#h_bar = kdensity(lot_level$target_price, start = "gumbel", kernel = "gaussian")
 
 
 # Silverman's rule of thumb
-library(sROC)
-bwidth_silverman = bw.nrd0(lot_level$max_bid)
-G_m = kCDF(lot_level$max_bid, bw= bwidth_silverman, kernel = c("normal", "epanechnikov"))
-print(h_bar(100))
-print(G_m(2000))
-# I've confused myself with this empirical cdf stuff now so im going to bed
-# but it's either this kCDF thing or ecdf thing and i dont know enough math to figure it out rn
+bwidth_silverman = bw.nrd0(stamps_final$resid)
+# from only target auctions won from outside ring
+hr_bar <- density(stamps_final$resid[stamps_final$ring_won==0 & stamps_final$target == 1], bw = bwidth_silverman)
+# from only highest ring bidder
+gm <- density(stamps_final$resid[stamps_final$highest_ringer == 1], bw = bwidth_silverman)
+# compute CDF
+Gm <- cumsum(gm$y)
+Gm <- Gm/max(Gm)
+```
 
-A = integrate(function(x) h_bar(x)/(1-G_m(x)), lower = -Inf, upper = Inf)$value
-print(lol)
+```{r integrate}
+# first create functions for everything
+hr_bar_fun <- approxfun(hr_bar$x, hr_bar$y)
+gm_fun <- approxfun(gm$x, gm$y)
+Gm_fun <- approxfun(gm$x, Gm)
+
+# Now integrate
+A = integrate(function(x) (hr_bar_fun(x)/(1-Gm_fun(x))), lower = max(min(hr_bar$x), min(gm$x)), upper = max(gm$x)-.001)$value
+print(A)
+
+# create hr
+hr <- function(r) {
+  A*hr_bar_fun(r) / (1-Gm_fun(r))
+}
+Hr <- function(r) {
+  A*integrate(function(x) (hr_bar_fun(x)/(1-Gm_fun(x))), lower = max(min(hr_bar$x), min(gm$x)), upper = r)$value
+}
+```
+# Ok now time for some individuals level densities
+```{r get gi, Gi, alphas}
+# get g_i, G_i
+gi_array = array(data = NA, dim = c(11, 512))
+Gi_array = array(data = NA, dim = c(11, 512))
+xi_array = array(data = NA, dim = c(11,512))
+minbid = min(stamps_final$resid[stamps_final$target==0])
+maxbid = max(stamps_final$resid[stamps_final$target==0])
+from_bid = minbid - 3*bwidth_silverman
+to_bid = maxbid + 3*bwidth_silverman
+for(b in 1:11) {
+  gi = density(stamps_final$resid[stamps_final$bidder==b], bw = bwidth_silverman, n=512, from = from_bid, to = to_bid)
+  Gi = cumsum(gi$y)
+  Gi = Gi/max(Gi)
+  gi_array[b,] = gi$y
+  xi_array[b,] = gi$x
+  Gi_array[b,] = Gi
+}
+
+# get alphas
+auction_count <- dim(target)[1]*2
+alphas <- ok %>%
+  group_by(bidder) %>%
+  summarise(alpha = sum(ones)/auction_count) %>%
+  select(bidder, alpha)
+
+G_i <- c(1:512)*0
+g_i <- c(1:512)*0
+for(b in 1:11) {
+  alpha = alphas$alpha[b]
+  for(g in 1:512) {
+    g_i[g] = g_i[g] + alpha*gi_array[b,g]
+    G_i[g] = G_i[g] + alpha*Gi_array[b,g]
+  }
+  #g_i = g_i + alpha*gi_array[b]
+}
+
+# construct g_i and G_i
+
 ```
