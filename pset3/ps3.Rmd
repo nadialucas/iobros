@@ -27,7 +27,7 @@ When you click the **Knit** button a document will be generated that includes bo
 #================================================#
 # set up
 #================================================#
-
+rm(list = ls())
 # packages
 library(tidyverse)
 library(tigris)
@@ -145,7 +145,7 @@ good_bidder <- stamps %>%
   group_by(bidder) %>%
   summarise(total_pay = sum(payment), pct_won = sum(highest_ringer)/sum(ones)) 
 
-# looks like we should drop 2 and 10
+# looks like we should drop 2 and 10 potentially
 
 #================================================#
 # create structural dataset
@@ -154,58 +154,68 @@ ok <- subset(stamps, ringers == 2)
 
 # auction characteristics 
 auctions <- ok %>%
-  select(house,date,lot,est_min,est_max,catalog_price,grade_min,grade_max,us,no_value,auction_id,ring_won) %>%
+  select(est_min,est_max,catalog_price,grade_min,grade_max,us,no_value,auction_id,ring_won) %>%
   distinct()
 
 # knockout bids
 ko <-  ok %>%
-  select(house,date,lot,bidder,ko_bid,ring_winner,highest_ringer,auction_id) %>%
+  select(auction_id, bidder, ko_bid, ring_won, ring_winner, highest_ringer, auction_id) %>%
   rename(bid = "ko_bid") %>%
   mutate(target = 0)
   
 # target bids
 target <- ok %>%
-  group_by(house,date,lot) %>%
-  summarise(bid = mean(target_price), auction_id = mean(auction_id)) %>%
+  group_by(auction_id) %>%
+  summarise(bid = mean(target_price), auction_id = mean(auction_id), ring_won = mean(ring_won)) %>%
+  mutate(highest_ringer = 0) %>%
+  mutate(ring_winner = 2) %>%
   mutate(target = 1) %>%
-  mutate(bidder = 0) %>%
-  mutate(ring_winner = 3) %>%
-  mutate(highest_ringer = 3)
+  mutate(bidder = 0)
 
 # append target + knockout bids
 bind <- rbind(ko, target)
 
 # merge bids with auction characteristics
-stamps_final <- bind %>%
+stamps_reg <- bind %>%
   inner_join(auctions) %>%
-  mutate(lnb = log(bid))
+  mutate(lnb = log(bid)) %>%
+  group_by(ring_winner) %>%
+  mutate(lnb_mean = mean(lnb)) %>%
+  ungroup
+
+stamps_reg <- stamps_reg %>%
+  mutate(y = lnb - lnb_mean)
 ```
 
-```{r regresion and predict}
+```{r regression and predict}
+# somehow adding auction fixed effects blows the residuals up
+fit1 <- lm(formula = lnb ~ 0 + est_min + est_max + catalog_price + grade_min + grade_max + us+ no_value + target + factor(bidder), data = stamps_reg)
 # first stage regression
-fit1 <- lm(lnb ~ est_min + est_max + catalog_price + grade_min + grade_max + factor(us) + factor(no_value) 
-           + factor(bidder) + factor(target) + factor(auction_id), data = stamps_final)
 
+fit_sum <- coef(summary(fit1))
 # predicted bids
-stamps_final$lnbhat <- stamps_final$lnb - (fit1$coefficients[2]*stamps_final$est_min + fit1$coefficients[3]*stamps_final$est_max +
-  fit1$coefficients[4]*stamps_final$catalog_price + fit1$coefficients[5]*stamps_final$grade_min + fit1$coefficients[6]*stamps_final$grade_max + 
-  fit1$coefficients[7]*stamps_final$us + fit1$coefficients[8]*stamps_final$no_value)
+stamps_reg$lnbhat <- stamps_reg$lnb - (fit_sum[1,1]*stamps_reg$est_min + fit_sum[2,1]*stamps_reg$est_max +
+  fit_sum[3,1]*stamps_reg$catalog_price + fit_sum[4,1]*stamps_reg$grade_min + fit_sum[5,1]*stamps_reg$grade_max + 
+  fit_sum[6,1]*stamps_reg$us + fit_sum[7,1]*stamps_reg$no_value )
 
-stamps_final <- stamps_final %>%
+stamps_reg <- stamps_reg %>%
   mutate(bhat = exp(lnbhat))
-  
+
+print(max(stamps_reg$bhat))
 ```
+
+
 # Using Silverman's rule to get densities
 # and adding up to get a CDF
 ```{r density time}
 
 
 # Silverman's rule of thumb
-bwidth_silverman = bw.nrd0(stamps_final$resid)
+bwidth_silverman = bw.nrd0(stamps_reg$bhat)
 # from only target auctions won from outside ring
-hr_bar <- density(stamps_final$resid[stamps_final$ring_won==0 & stamps_final$target == 1], bw = bwidth_silverman)
+hr_bar <- density(stamps_reg$bhat[stamps_reg$ring_won==0 & stamps_reg$target == 1], bw = bwidth_silverman)
 # from only highest ring bidder
-gm <- density(stamps_final$resid[stamps_final$highest_ringer == 1], bw = bwidth_silverman)
+gm <- density(stamps_reg$bhat[stamps_reg$highest_ringer == 1], bw = bwidth_silverman)
 # compute CDF
 Gm <- cumsum(gm$y)
 Gm <- Gm/max(Gm)
@@ -218,7 +228,7 @@ gm_fun <- approxfun(gm$x, gm$y)
 Gm_fun <- approxfun(gm$x, Gm)
 
 # Now integrate
-A = 1/integrate(function(x) (hr_bar_fun(x)/(1-Gm_fun(x))), lower = max(min(hr_bar$x), min(gm$x)), upper = max(gm$x)-1)$value
+A = 1/integrate(function(x) (hr_bar_fun(x)/(1-Gm_fun(x))), lower = 0, upper = 1600)$value
 print(A)
 
 # create hr
@@ -235,12 +245,12 @@ Hr <- function(r) {
 gi_array = array(data = NA, dim = c(11, 512))
 Gi_array = array(data = NA, dim = c(11, 512))
 xi_array = array(data = NA, dim = c(11,512))
-minbid = min(stamps_final$resid[stamps_final$target==0])
-maxbid = max(stamps_final$resid[stamps_final$target==0])
+minbid = min(stamps_reg$bhat[stamps_reg$target==0])
+maxbid = max(stamps_reg$bhat[stamps_reg$target==0])
 from_bid = minbid - 3*bwidth_silverman
 to_bid = maxbid + 3*bwidth_silverman
 for(b in 1:11) {
-  gi = density(stamps_final$resid[stamps_final$bidder==b], bw = bwidth_silverman, n=512, from = from_bid, to = to_bid)
+  gi = density(stamps_reg$bhat[stamps_reg$bidder==b], bw = bwidth_silverman, n=512, from = from_bid, to = to_bid)
   Gi = cumsum(gi$y)
   Gi = Gi/max(Gi)
   gi_array[b,] = gi$y
@@ -277,19 +287,20 @@ print(minbid)
 minbid = min(hr_bar$x)
 print(maxbid)
 v <- function(b) {
-  print(b)
   num = 0.5 * Hr(b)*(1-G_i_fun(b))
   denom = hr(b)*G_i_fun(b) + Hr(b)*g_i_fun(b)
   b - num/denom
 }
-bids = seq(minbid, maxbid, by = 20)
+bids = seq(250,1100, by = 1)
 
 vals = lapply(bids, v)
 # lol yikes
-plot(bids[vals>0], vals[vals>0])
+plot(vals, bids)
 ```
 
 ```{r plot 2}
-x = xi_array[1,]
-plot(x[x>0], G_i[x>0])
+x = seq(250,1100, by = 1)
+vals = lapply(bids, v)
+Hr_y = lapply(x, Hr)
+plot(vals, Hr_y)
 ```
